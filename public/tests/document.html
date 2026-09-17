@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>FrameZero — document model tests</title>
+<style>
+  body{background:#0d0f14;color:#e6e9f0;font:13px/1.5 ui-monospace,Menlo,monospace;margin:0;padding:18px}
+  .pass{color:#00e5a0}.fail{color:#ff5c7a}.skip{color:#8a93a6}
+  h2{font-size:13px;color:#8a93a6;text-transform:uppercase;letter-spacing:.12em;margin:22px 0 6px}
+  #sum{position:sticky;top:0;background:#0d0f14;padding:10px 0;border-bottom:1px solid #232a38;font-size:15px;z-index:9}
+  td{padding:2px 0;vertical-align:top}td.n{width:26px;color:#5b6478}
+  canvas{background:#000;margin:4px 6px 4px 0;display:inline-block;image-rendering:pixelated}
+</style></head>
+<body>
+<div id="sum">running…</div>
+<div id="log"></div>
+<script type="module">
+const CK=n=>{window.__CK__=n;console.info('CK '+n);};
+CK('boot');
+const logEl=document.getElementById('log'),sumEl=document.getElementById('sum');
+window.addEventListener('unhandledrejection',e=>console.info('UNHANDLED '+(e.reason?.stack||e.reason)));
+
+import {
+  createProject, createComp, createLayer, resolveLayer, resolveScene, resolveProp,
+  addEffect, addEffectSpec, removeEffect, serialize, deserialize,
+  UndoStack, snapshot, restore, projectDuration, layerKeyTimes, resetLayerCounters,
+  setKey, COMP_PRESETS, DEFAULT_TEXT,
+} from '/js/core/document.js';
+import { EFFECTS, EFFECT_LIST, defaultParams } from '/js/effects/registry.js';
+import { FontRegistry } from '/js/core/fonts.js';
+import { Renderer } from '/js/render/compositor.js';
+
+const results=[];let group='',curTable=null;
+function G(n){group=n;const h=document.createElement('h2');h.textContent=n;logEl.append(h);
+  const t=document.createElement('table');t.dataset.g=n;logEl.append(t);return t;}
+function T(name,ok,detail){
+  results.push({group,name,ok,detail});
+  if(!curTable||curTable.dataset.g!==group)curTable=G(group);
+  const tr=document.createElement('tr');
+  const cls=ok===null?'skip':(ok?'pass':'fail');const mark=ok===null?'○':(ok?'✓':'✗');
+  tr.innerHTML=`<td class="n">${mark}</td><td class="${cls}">${name}</td><td class="${cls}" style="opacity:.75;padding-left:10px">${detail??''}</td>`;
+  curTable.append(tr);
+}
+const chk=(n,c,d)=>T(n,!!c,d);
+const eq=(n,a,b,d)=>T(n,JSON.stringify(a)===JSON.stringify(b),`${d??''} got=${JSON.stringify(a)} want=${JSON.stringify(b)}`);
+const near=(n,a,b,tol,d)=>T(n,Math.abs(a-b)<=tol,`${d??''} got=${a} want≈${b} ±${tol}`);
+const info=(n,d)=>T(n,null,d);
+const mkCanvas=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;c.style.width=w+'px';c.style.height=h+'px';return c;};
+const hashOf=(c)=>{const d=c.getContext('2d',{willReadFrequently:true}).getImageData(0,0,c.width,c.height).data;let h=2166136261;
+  for(let i=0;i<d.length;i+=5){h^=d[i];h=Math.imul(h,16777619);}return (h>>>0).toString(16);};
+const inkOf=(c,thr=30)=>{const d=c.getContext('2d',{willReadFrequently:true}).getImageData(0,0,c.width,c.height).data;let n=0;
+  for(let i=3;i<d.length;i+=4)if(d[i]>thr)n++;return n;};
+/* linear-eased track: deterministic, no easing curve in the way */
+const track=(pts)=>({keys:pts.map(([t,v])=>({t,v,ease:'linear'}))});
+
+/* ═══ 1. model construction ═══ */
+CK('1'); group='1. document model'; curTable=null;
+{
+  resetLayerCounters();
+  const p=createProject();
+  eq('a new project is 1920×1080 @30 for 4s',[p.comp.width,p.comp.height,p.comp.fps,p.comp.duration],[1920,1080,30,4]);
+  chk('a new project starts empty',p.layers.length===0,`layers=${p.layers.length}`);
+  chk('project carries a format+version so files are identifiable',p.format==='framezero/project'&&p.version===1,`${p.format} v${p.version}`);
+  chk('every project gets a unique id',createProject().id!==createProject().id);
+  eq('comp presets match the <select> in the shell',COMP_PRESETS.map(c=>c.id),['1920x1080','1080x1920','1080x1080','3840x2160','1280x720']);
+
+  const t=createLayer('text');
+  chk('text layer carries the typography defaults',t.text.family===DEFAULT_TEXT.family&&t.text.size===DEFAULT_TEXT.size,
+      `${t.text.family} ${t.text.size}px w${t.text.weight}`);
+  chk('text layer has no shape/style (renderer branches on type)',t.shape===undefined&&t.style===undefined);
+  const s=createLayer('shape',{shapeType:'star'});
+  eq('shape layer gets that shape type plus its own defaults',[s.shape.type,s.shape.points,s.shape.innerRatio],['star',5,0.45]);
+  chk('shape layer has a paint style',typeof s.style.fill==='string'&&s.style.fillOpacity===1,JSON.stringify(s.style).slice(0,60));
+  chk('shape layer has an explicit raster size',s.width>0&&s.height>0,`${s.width}×${s.height}`);
+  chk('layers start visible, unlocked, unsoloed, fully opaque',
+      t.visible===true&&t.locked===false&&t.solo===false&&t.opacity===1);
+  chk('layer names auto-increment per type',createLayer('text').name!==createLayer('text').name,
+      `${createLayer('text').name} / ${createLayer('shape').name}`);
+}
+
+/* ═══ 2. the resolver ═══ */
+CK('2'); group='2. resolver: tracks → flat numbers'; curTable=null;
+{
+  const p=createProject({comp:{duration:4}});
+  const L=createLayer('shape',{shapeType:'ellipse',width:200,height:200});
+  L.transform.position=track([[0,[0,0]],[2,[400,100]]]);
+  L.transform.rotation=track([[0,0],[2,90]]);
+  L.transform.scale=track([[0,[1,1]],[2,[0.5,2]]]);
+  L.opacity=track([[0,1],[2,0.25]]);
+  p.layers.push(L);
+
+  const a=resolveLayer(L,0,p.comp), b=resolveLayer(L,1,p.comp), c=resolveLayer(L,2,p.comp);
+  eq('position interpolates linearly at the midpoint',b.resolved.position,[200,50]);
+  eq('position reaches the second key at t=2',c.resolved.position,[400,100]);
+  near('rotation interpolates',b.resolved.rotation,45,1e-9);
+  eq('scale interpolates per-component',b.resolved.scale,[0.75,1.5]);
+  near('opacity interpolates',b.opacity,0.625,1e-9);
+  chk('resolved values are PLAIN numbers/arrays, never track objects',
+      typeof b.resolved.rotation==='number'&&Array.isArray(b.resolved.position)
+      &&b.resolved.position.every(v=>typeof v==='number')
+      &&!(b.resolved.position instanceof Object && 'keys' in b.resolved.position && Array.isArray(b.resolved.position.keys)),
+      `position=${JSON.stringify(b.resolved.position)} rotation=${b.resolved.rotation}`);
+
+  const before=resolveLayer(L,-5,p.comp).resolved.position, after=resolveLayer(L,99,p.comp).resolved.position;
+  eq('time before the first key clamps to it',before,[0,0]);
+  eq('time after the last key clamps to it',after,[400,100]);
+
+  const held=createLayer('shape');
+  held.transform.position={keys:[{t:0,v:[10,10],ease:'hold'},{t:2,v:[90,90],ease:'linear'}]};
+  eq('a hold key does not interpolate',resolveLayer(held,1.5,{duration:4}).resolved.position,[10,10]);
+
+  const st=createLayer('shape');
+  st.opacity=track([[0,4],[1,-3]]);
+  chk('opacity is clamped into 0..1 however wild the keys are',
+      resolveLayer(st,0,{duration:4}).opacity===1&&resolveLayer(st,1,{duration:4}).opacity===0);
+
+  eq('resolveProp passes static values straight through',resolveProp(12.5,3),12.5);
+}
+
+/* ═══ 3. scene assembly ═══ */
+CK('3'); group='3. scene assembly'; curTable=null;
+{
+  const p=createProject({comp:{width:320,height:180,duration:4,background:'#101418'}});
+  const A=createLayer('shape',{name:'A',width:80,height:80});
+  const B=createLayer('shape',{name:'B',width:80,height:80}); B.visible=false;
+  const C=createLayer('shape',{name:'C',width:80,height:80}); C.inPoint=1; C.outPoint=2;
+  p.layers.push(A,B,C);
+
+  eq('scene carries the comp size and background',
+     [resolveScene(p,0).width,resolveScene(p,0).height,resolveScene(p,0).background],[320,180,'#101418']);
+  eq('invisible layers are dropped',[A,C].map(l=>l.id).includes('x')?'':'ok','ok');
+  eq('at t=0 only the always-on layer is in the scene',resolveScene(p,0).layers.map(l=>l.name),['A']);
+  eq('at t=1.5 the in/out window opens',resolveScene(p,1.5).layers.map(l=>l.name),['A','C']);
+  eq('at t=2 the out point is exclusive (AE semantics)',resolveScene(p,2).layers.map(l=>l.name),['A']);
+
+  A.solo=true;
+  eq('solo isolates: only soloed layers survive',resolveScene(p,1.5).layers.map(l=>l.name),['A']);
+  C.solo=true;
+  eq('two soloed layers both show',resolveScene(p,1.5).layers.map(l=>l.name),['A','C']);
+
+  A.solo=C.solo=false;
+  const sc=resolveScene(p,0);
+  chk('layer order is preserved bottom→top',sc.layers.map(l=>l.name).join(',')==='A','order='+sc.layers.map(l=>l.name));
+  chk('in/out are forwarded so the renderer can cull too',sc.layers[0].in===0&&sc.layers[0].out===4,
+      `in=${sc.layers[0].in} out=${sc.layers[0].out}`);
+}
+
+/* ═══ 4. effects on layers ═══ */
+CK('4'); group='4. effect instances'; curTable=null;
+{
+  const L=createLayer('text');
+  const fx=addEffect(L,'gaussianBlur',{radius:20});
+  chk('addEffect appends and returns the instance',L.effects.length===1&&fx===L.effects[0]);
+  eq('params start from the effect defaults, then take the override',
+     [fx.params.radius,fx.params.quality],[20,defaultParams(EFFECTS.gaussianBlur).quality]);
+  chk('an unknown effect id is rejected, not silently stored',addEffect(L,'notARealEffect')===null&&L.effects.length===1);
+  chk('addEffectSpec is pure (does not touch the layer)',addEffectSpec('bloom')!==null&&L.effects.length===1);
+  fx.enabled=false;
+  chk('a disabled effect survives on the layer (it is not deleted)',L.effects.length===1&&L.effects[0].enabled===false);
+
+  const r=resolveLayer(L,0,{duration:4});
+  chk('the resolver forwards enabled:false so the renderer can skip it',r.effects[0].enabled===false);
+  const L2=createLayer('text'); addEffect(L2,'bloom'); addEffect(L2,'grain');
+  const removed=removeEffect(L2,0);
+  eq('removeEffect splices by index and returns what it removed',[removed.id,L2.effects.length],['bloom',1]);
+  chk('removeEffect ignores an out-of-range index',removeEffect(L2,9)===null&&L2.effects.length===1);
+  const L3=createLayer('text'); L3.effects=[{id:'deletedEffect',enabled:true,params:{}}];
+  chk('a layer pointing at a now-unknown effect does not crash the resolver',resolveLayer(L3,0,{duration:4}).effects.length===0);
+  info('effects available to the UI',`${EFFECT_LIST.length} registered`);
+}
+
+/* ═══ 5. text + shape property resolution ═══ */
+CK('5'); group='5. type & shape property resolution'; curTable=null;
+{
+  const L=createLayer('text');
+  L.text.text='FrameZero'; L.text.size=track([[0,40],[2,160]]); L.text.weight=track([[0,300],[2,900]]);
+  L.text.tracking=track([[0,-2],[2,8]]);
+  const mid=resolveLayer(L,1,{duration:4}).resolved.text;
+  near('animated size interpolates',mid.size,100,1e-9);
+  near('animated weight interpolates',mid.weight,600,1e-9);
+  near('animated tracking interpolates',mid.tracking,3,1e-9);
+  eq('static text content passes through',mid.text,'FrameZero');
+  chk('family/align/direction are preserved for the typography engine',
+      mid.family==='Inter'&&mid.align==='left'&&mid.direction==='auto');
+  chk('axes survive (variable-font instances depend on them)',typeof mid.axes==='object');
+
+  const anim=createLayer('text'); anim.animators=[{id:'a1',unit:'glyph',props:{y:-40}}];
+  chk('animators are forwarded verbatim',resolveLayer(anim,0,{duration:4}).resolved.animators.length===1);
+
+  /* ── masks & track mattes in the model ── */
+  const mkd=createLayer('shape',{width:200,height:200});
+  mkd.masks={enabled:true,items:[{id:'m1',shape:'ellipse',cx:0,cy:0,w:100,h:100,rot:0,feather:4,opacity:1,invert:false,mode:'add'}]};
+  const rm=resolveLayer(mkd,0,{duration:4});
+  chk('resolveLayer forwards a resolved mask stack',rm.masks&&rm.masks.items.length===1&&rm.masks.items[0].w===100,
+      JSON.stringify(rm.masks&&rm.masks.items[0]||null).slice(0,120));
+  const mkTrack=createLayer('shape',{width:200,height:200});
+  mkTrack.masks={enabled:true,items:[{id:'m1',shape:'ellipse',cx:{keys:[{t:0,v:0},{t:1,v:80}]},cy:0,w:100,h:100,rot:0,feather:0,opacity:1,invert:false,mode:'add'}]};
+  chk('mask centres can be keyframed tracks',resolveLayer(mkTrack,1,{duration:4}).masks.items[0].cx===80,
+      `cx@1s=${resolveLayer(mkTrack,1,{duration:4}).masks.items[0].cx}`);
+  chk('a layer without masks resolves to a null mask stack',resolveLayer(createLayer('text'),0,{duration:4}).masks===null);
+
+  const src=createLayer('shape',{name:'Matte src'});
+  const cons=createLayer('shape',{name:'Consumer'});
+  cons.matte={source:src.id,mode:'luma',invert:true};
+  const rc=resolveLayer(cons,0,{duration:4});
+  chk('matte spec survives resolution with a normalised mode',rc.matte&&rc.matte.id===src.id&&rc.matte.mode==='luma'&&rc.matte.invert===true,
+      JSON.stringify(rc.matte));
+  const scene=resolveScene({comp:{width:100,height:100,fps:30,duration:4,background:'#000'},layers:[src,cons]},0);
+  const sSrc=scene.layers.find(l=>l.id===src.id), sCons=scene.layers.find(l=>l.id===cons.id);
+  chk('the matte source reaches the scene flagged matteOnly',!!sSrc&&sSrc.matteOnly===true);
+  chk('the consumer carries the matte reference',!!sCons&&sCons.matte&&sCons.matte.id===src.id);
+  chk('a plain layer is not flagged matteOnly',resolveScene({comp:{width:10,height:10,fps:30,duration:1,background:'#000'},layers:[src]},0).layers[0].matteOnly===undefined);
+
+  const ser=deserialize(serialize({format:'framezero',version:1,name:'m',comp:{width:100,height:100,fps:30,duration:4,background:'#000'},layers:[mkd,src,cons],assets:[]}));
+  chk('masks and mattes survive a save/open round-trip',
+      !ser.error&&ser.project.layers[0].masks.items[0].shape==='ellipse'&&ser.project.layers[2].matte.source===src.id,
+      ser.error||'ok');
+  const repaired=deserialize(JSON.stringify({layers:[{id:'x',type:'shape',masks:{items:'nope'},matte:42}]}));
+  chk('a corrupt mask/matte field opens repaired, not rejected',!repaired.error,
+      repaired.error||`masks=${JSON.stringify(repaired.project.layers[0].masks)} matte=${JSON.stringify(repaired.project.layers[0].matte)}`);
+
+  const G=createLayer('shape',{shapeType:'grid'});
+  G.shape.phase=track([[0,0],[2,48]]);
+  G.shape.cell=track([[0,20],[2,60]]);
+  near('animated shape params interpolate (grid phase drives motion)',resolveLayer(G,1,{duration:4}).resolved.shape.phase,24,1e-9);
+  near('animated shape cell interpolates',resolveLayer(G,1,{duration:4}).resolved.shape.cell,40,1e-9);
+  eq('non-animated shape params pass through',resolveLayer(G,1,{duration:4}).resolved.shape.type,'grid');
+
+  const S=createLayer('shape',{width:100,height:50});
+  S.style.fillOpacity=track([[0,1],[2,0]]);
+  near('animated style resolves too',resolveLayer(S,1,{duration:4}).resolved.style.fillOpacity,0.5,1e-9);
+  const sized=createLayer('shape',{width:100,height:50});
+  sized.width=track([[0,100],[2,300]]);
+  eq('the raster size itself can be animated',resolveLayer(sized,1,{duration:4}).width,200);
+}
+
+/* ═══ 6. serialisation ═══ */
+CK('6'); group='6. save / open round-trip'; curTable=null;
+{
+  resetLayerCounters();
+  const p=createProject({name:'roundtrip',comp:{width:640,height:360,fps:24,duration:3}});
+  const t=createLayer('text',{text:{text:'سلام دنیا',family:'Vazirmatn',size:64,direction:'rtl'}});
+  t.transform.position=track([[0,[0,0]],[3,[100,50]]]);
+  addEffect(t,'gaussianBlur',{radius:9});
+  const s=createLayer('shape',{shapeType:'star',width:200,height:200});
+  s.inPoint=0.5; s.outPoint=2.5; s.blend='screen'; s.opacity=0.7;
+  p.layers.push(t,s);
+
+  const json=serialize(p);
+  const {project:q,error}=deserialize(json);
+  chk('a saved project reopens without error',!error&&!!q,error||'ok');
+  eq('comp survives',[q.comp.width,q.comp.height,q.comp.fps,q.comp.duration],[640,360,24,3]);
+  eq('project name survives',q.name,'roundtrip');
+  eq('layer count survives',q.layers.length,2);
+  eq('layer identity is stable across a round-trip',q.layers.map(l=>l.id),p.layers.map(l=>l.id));
+  eq('RTL Persian text survives',q.layers[0].text.text,'سلام دنیا');
+  eq('position track survives key-for-key',q.layers[0].transform.position.keys.map(k=>[k.t,k.v]),[[0,[0,0]],[3,[100,50]]]);
+  eq('effect + its overridden param survive',[q.layers[0].effects[0].id,q.layers[0].effects[0].params.radius],['gaussianBlur',9]);
+  eq('blend/opacity/in/out survive',[q.layers[1].blend,q.layers[1].opacity,q.layers[1].inPoint,q.layers[1].outPoint],['screen',0.7,0.5,2.5]);
+  eq('a reopened project resolves identically at t=1',
+     resolveScene(q,1).layers.map(l=>l.resolved.position),resolveScene(p,1).layers.map(l=>l.resolved.position));
+
+  // corruption must not take the editor down
+  chk('malformed JSON returns an error, never throws',deserialize('{not json').error!==undefined);
+  chk('a non-object returns an error',deserialize('42').error!==undefined);
+  chk('an object without layers returns an error',deserialize('{"comp":{}}').error!==undefined);
+  const weird=deserialize(JSON.stringify({comp:{width:-5,height:0,fps:9999,duration:-2},layers:[null,42,{type:'text'}]}));
+  chk('absurd comp values are repaired, and the file still opens',
+      !!weird.project&&weird.project.comp.width>=16&&weird.project.comp.height>=16
+      &&weird.project.comp.fps<=240&&weird.project.comp.duration>=0.1,
+      weird.error||`${weird.project?.comp.width}×${weird.project?.comp.height} fps=${weird.project?.comp.fps} dur=${weird.project?.comp.duration}`);
+  chk('null/junk entries in layers are skipped',weird.project?weird.project.layers.length===1:false,
+      `kept=${weird.project?.layers.length}`);
+  const noFx=deserialize(JSON.stringify({comp:{},layers:[{type:'shape',effects:[{id:'gone',params:{}}]}]}));
+  chk('an effect that no longer exists is dropped on load',noFx.project.layers[0].effects.length===0);
+  info('serialised size',`${(json.length/1024).toFixed(1)} KB for a 2-layer project`);
+}
+
+/* ═══ 7. undo ═══ */
+CK('7'); group='7. undo / redo'; curTable=null;
+{
+  const p=createProject(); p.layers.push(createLayer('text',{name:'first'}));
+  const u=new UndoStack();
+  chk('nothing to undo on a fresh stack',u.canUndo===false&&u.canRedo===false);
+  chk('undo on an empty stack returns null, not a crash',u.undo(snapshot(p))===null);
+  chk('redo on an empty stack returns null',u.redo(snapshot(p))===null);
+
+  u.push(snapshot(p));                       // remember state before the edit
+  p.layers.push(createLayer('shape',{name:'second'}));
+  eq('the edit took effect',p.layers.map(l=>l.name),['first','second']);
+  const prev=u.undo(snapshot(p));
+  restore(p,prev);
+  eq('undo restores the previous layer list',p.layers.map(l=>l.name),['first']);
+  chk('undo makes redo available',u.canRedo===true);
+  const next=u.redo(snapshot(p)); restore(p,next);
+  eq('redo re-applies the edit',p.layers.map(l=>l.name),['first','second']);
+
+  u.push(snapshot(p)); p.layers[0].name='renamed';
+  u.push(snapshot(p)); p.layers[0].name='renamed again';
+  const before=p.layers[0].name;
+  restore(p,u.undo(snapshot(p)));
+  chk('undo walks back one step, not to the beginning',p.layers[0].name!==before&&p.layers[0].name==='renamed',
+      `${before} → ${p.layers[0].name}`);
+
+  const small=new UndoStack(3);
+  for(let i=0;i<10;i++)small.push(JSON.stringify({i}));
+  eq('the stack is bounded so a long session cannot eat memory',small.past.length,3);
+  const s2=new UndoStack(3); s2.push('a'); s2.push('b');
+  s2.undo('now'); 
+  chk('a new edit after an undo clears the redo branch',s2.push('c')===undefined&&s2.canRedo===false);
+  s2.clear(); chk('clear empties both branches',s2.canUndo===false&&s2.canRedo===false);
+}
+
+/* ═══ 8. helpers ═══ */
+CK('8'); group='8. duration & keyframe times'; curTable=null;
+{
+  const p=createProject({comp:{duration:4}});
+  near('duration defaults to the comp length',projectDuration(p),4,1e-9);
+  const L=createLayer('shape'); L.outPoint=9; p.layers.push(L);
+  near('a layer extending past the comp extends the duration',projectDuration(p),9,1e-9);
+  const p2=createProject({comp:{duration:4}}); p2.layers.push(createLayer('shape'));
+  near('duration never goes below a frame',projectDuration({...p2,comp:{...p2.comp,duration:0}}),0.1,1e-9);
+
+  const K=createLayer('text');
+  K.transform.position=track([[0,[0,0]],[1,[5,5]],[2.5,[9,9]]]);
+  K.opacity=track([[0.75,1],[1.25,0.4]]);
+  K.text.size=track([[3,40]]);
+  K.animators=[{id:'a',delay:0.4,duration:0.6}];
+  const times=layerKeyTimes(K);
+  chk('every key time across transform/opacity/text is collected',
+      [0,1,2.5,0.75,1.25,3].every(t=>times.some(x=>Math.abs(x-t)<1e-9)),times.join(','));
+  chk('animator delays are collected (prev/next key must find them)',times.some(t=>Math.abs(t-0.4)<1e-9),times.join(','));
+  chk('times come back sorted and deduplicated',
+      times.every((t,i)=>i===0||t>=times[i-1])&&new Set(times).size===times.length,times.join(','));
+  eq('a layer with no animation reports no key times',layerKeyTimes(createLayer('shape')),[]);
+}
+
+/* ═══ 9. END TO END: does the resolved scene actually render? ═══ */
+CK('9'); group='9. resolved scene renders (contract proof)'; curTable=null;
+{
+  /* The resolver's output contract is only worth anything if the Renderer
+     accepts it. This is the assertion that would catch a field-name drift
+     between document.js and compositor.js. */
+  const registry=new FontRegistry();
+  await registry.loadStock(); await registry.loadMeta();
+
+  const p=createProject({comp:{width:320,height:180,fps:30,duration:2,background:'#0d0f14'}});
+  const bg=createLayer('shape',{name:'bg',shapeType:'gradient',width:320,height:180});
+  bg.transform.position=[160,90];
+  bg.shape={type:'gradient',from:'#123',to:'#0d0f14',angle:135};
+  const orb=createLayer('shape',{name:'orb',shapeType:'ellipse',width:120,height:120});
+  orb.transform.position=[100,90]; orb.blend='screen'; orb.opacity=0.9;
+  orb.transform.position=track([[0,[70,90]],[2,[250,90]]]);
+  addEffect(orb,'gaussianBlur',{radius:6,quality:9});
+  const txt=createLayer('text',{name:'title'});
+  txt.text={...txt.text,text:'FrameZero',family:'Inter',size:40,weight:800,color:'#ffffff'};
+  txt.transform.position=[160,90];
+  p.layers.push(bg,orb,txt);
+
+  for(const kind of ['webgl2','canvas2d']){
+    const c=mkCanvas(320,180);
+    const r=new Renderer();
+    const init=await r.attach(c,{preferred:kind,width:320,height:180,dpr:1});
+    if(init.chosen!==kind){info(`${kind} unavailable`,init.chosen);continue;}
+    let err=null,ink0=0,h0='',h1='';
+    const fs0={layers:0,uploads:0,passes:0};
+    try{
+      // t=0 and t=1 — both INSIDE the 2s comp. (t=2 is the exclusive end, so
+      // resolveScene correctly returns zero layers there; asserting on that
+      // frame was the original test bug.)
+      r.renderFrame(resolveScene(p,0),0,registry);
+      Object.assign(fs0,{layers:r.frameStats.layers,uploads:r.frameStats.uploads,passes:r.frameStats.passes});
+      const rb0=r.readback(); const c0=mkCanvas(320,180); c0.getContext('2d').drawImage(rb0.canvas,0,0);
+      ink0=inkOf(c0); h0=hashOf(c0);
+      r.renderFrame(resolveScene(p,1),1,registry);
+      const rb1=r.readback(); const c1=mkCanvas(320,180); c1.getContext('2d').drawImage(rb1.canvas,0,0);
+      h1=hashOf(c1);
+      logEl.append(c0,c1);
+    }catch(e){err=e;}
+    chk(`${kind}: a resolved scene renders with no exception`,!err,err?`${err.message}`:'2 frames rendered');
+    chk(`${kind}: the scene actually painted pixels`,ink0>2000,`ink@t=0 ${ink0}px`);
+    // ink saturates (the gradient background is opaque everywhere), so compare
+    // a hash: the animated orb must actually have moved.
+    chk(`${kind}: animating position changes the rendered frame`,h0!==h1&&!!h0,`hash t=0 ${h0} → t=1 ${h1}`);
+    chk(`${kind}: no shader/effect errors`,(r.stats().shaderErrors||[]).length===0,(r.stats().shaderErrors||[]).join('|'));
+    if(kind==='webgl2'){
+      chk('the renderer reports the layers the resolver gave it',fs0.layers===3&&fs0.uploads===3,
+          `layers=${fs0.layers} uploads=${fs0.uploads} passes=${fs0.passes}`);
+      chk('the effect ran as a real GPU pass',fs0.passes===1,`passes=${fs0.passes}`);
+    }
+    r.destroy();
+  }
+}
+
+/* ═══ summary ═══ */
+const passed=results.filter(r=>r.ok===true).length,failed=results.filter(r=>r.ok===false).length,skipped=results.filter(r=>r.ok===null).length;
+sumEl.innerHTML=`<span class="${failed?'fail':'pass'}">${failed?'FAILED':'ALL PASS'}</span> — ${passed} passed, ${failed} failed, ${skipped} info`;
+window.__TESTS__={results,passed,failed,skipped,groups:[...new Set(results.map(r=>r.group))]};
+document.title=failed?`TEST-FAIL-${failed}`:'TEST-PASS';
+</script>
+</body>
+</html>

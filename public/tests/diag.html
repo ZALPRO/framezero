@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="utf-8"><title>diag</title></head><body><pre id="o"></pre>
+<script type="module">
+const o=document.getElementById('o');
+const CK=async(n,f)=>{const t=performance.now();o.textContent+=`[start] ${n}\n`;
+  try{const v=await f();o.textContent+=`[ ok  ] ${n}  ${(performance.now()-t).toFixed(1)}ms  ${v!==undefined?JSON.stringify(v).slice(0,200):''}\n`;}
+  catch(e){o.textContent+=`[FAIL ] ${n}  ${(performance.now()-t).toFixed(1)}ms  ${e.message}\n${(e.stack||'').split('\n').slice(0,4).join('\n')}\n`;window.__DIAG_FAIL__=n;throw e;}
+  window.__DIAG__=n;};
+window.__DIAGLOG__=()=>o.textContent;
+try{
+const F=await CK('import fonts',async()=>{const m=await import('/js/core/fonts.js');return Object.keys(m).length;});
+const fonts=await import('/js/core/fonts.js');
+const T=await import('/js/render/typography.js');
+await CK('import typography',async()=>'ok');
+const reg=new fonts.FontRegistry();
+await CK('loadStock',async()=>{await reg.loadStock();return reg.loaded.size;});
+await CK('loadMeta',async()=>{const m=await reg.loadMeta();return m?Object.keys(m).join(','):'NULL';});
+await CK('buildRuns FA/Inter',async()=>{const r=T.buildRuns('سلام دنیا',reg,'Inter');return {warns:r.warnings.length,fams:r.runs.map(x=>x.family)};});
+await CK('layout latin small',async()=>{const L=T.layoutText({text:'Frame Zero',family:'Inter',size:64,weight:400,leading:1.2},reg);return {lines:L.lines.length,units:L.lines[0].units.length,W:L.lines[0].buffer.W,H:L.lines[0].buffer.H,ms:L.metrics.layoutMs};});
+await CK('layout persian',async()=>{const L=T.layoutText({text:'سلام دنیا',family:'Vazirmatn',size:64,weight:400,leading:1.4,direction:'rtl'},reg);return {units:L.lines[0].units.length,words:L.lines[0].wordCount,W:L.lines[0].buffer.W,ms:L.metrics.layoutMs};});
+await CK('layout digits',async()=>{const L=T.layoutText({text:'0123456789',family:'Inter',size:64,weight:400,leading:1.2},reg);return L.lines[0].units.length;});
+await CK('layout multiline',async()=>{const L=T.layoutText({text:'one\ntwo\nthree',family:'Inter',size:32,weight:400,leading:1.3,align:'center'},reg);return {lines:L.lines.length,x:L.lines.map(l=>Math.round(l.x))};});
+await CK('layout wrap',async()=>{const L=T.layoutText({text:'the quick brown fox jumps over the lazy dog',family:'Inter',size:32,weight:400,maxWidth:220,leading:1.3},reg);return {lines:L.lines.length,w:L.lines.map(l=>Math.round(l.width))};});
+await CK('layout LONG 1200ch',async()=>{const t=performance.now();const L=T.layoutText({text:'abcdefghij'.repeat(120),family:'Inter',size:28,weight:400,leading:1.25},reg);return {ms:+(performance.now()-t).toFixed(1),units:L.lines[0].units.length,W:L.lines[0].buffer.W,H:L.lines[0].buffer.H};});
+await CK('instance GRAD',async()=>{const i=await reg.instance('Roboto Flex',{GRAD:150});return {fam:i.family,ms:+i.ms.toFixed(1)};});
+await CK('layout with axes',async()=>{const L=T.layoutText({text:'Handgloves',family:'Roboto Flex',size:72,weight:900,leading:1.3,axes:{GRAD:150}},reg);return {units:L.lines[0].units.length,W:L.lines[0].buffer.W};});
+await CK('computeUnitStates',async()=>{const L=T.layoutText({text:'abcd',family:'Inter',size:64,weight:400,leading:1.2},reg);
+  const s=T.computeUnitStates(L.lines[0],[T.defaultAnimator({props:{y:-50,opacity:0},delay:0,duration:1})],0.5);return s.map(x=>({y:+x.y.toFixed(1),o:+x.opacity.toFixed(2)}));});
+await CK('drawText no anim',async()=>{const L=T.layoutText({text:'Frame Zero',family:'Inter',size:64,weight:400,leading:1.2},reg);
+  const c=document.createElement('canvas');c.width=900;c.height=250;const g=c.getContext('2d');T.drawText(g,L,0,{x:50,y:50,animators:[]});
+  const d=g.getImageData(0,0,900,250).data;let n=0;for(let i=3;i<d.length;i+=4)if(d[i]>30)n++;return {ink:n};});
+await CK('drawText animated',async()=>{const L=T.layoutText({text:'Frame Zero',family:'Inter',size:64,weight:400,leading:1.2},reg);
+  const c=document.createElement('canvas');c.width=900;c.height=300;const g=c.getContext('2d');
+  T.drawText(g,L,0.12,{x:50,y:60,animators:[T.defaultAnimator({props:{y:-40,opacity:0.2,scale:0.9},delay:0.03,duration:0.5})]});
+  const d=g.getImageData(0,0,900,300).data;let n=0;for(let i=3;i<d.length;i+=4)if(d[i]>30)n++;return {ink:n};});
+await CK('drawText persian animated',async()=>{const L=T.layoutText({text:'سلام دنیا',family:'Vazirmatn',size:64,weight:400,leading:1.4,direction:'rtl'},reg);
+  const c=document.createElement('canvas');c.width=900;c.height=300;const g=c.getContext('2d');
+  T.drawText(g,L,0.06,{x:100,y:80,animators:[T.defaultAnimator({props:{y:-30},delay:0.02,duration:0.4})]});
+  const d=g.getImageData(0,0,900,300).data;let n=0;for(let i=3;i<d.length;i+=4)if(d[i]>30)n++;return {ink:n};});
+await CK('perf 60 animated frames',async()=>{const L=T.layoutText({text:'Motion design without compromise',family:'Inter',size:72,weight:700,leading:1.2},reg);
+  const c=document.createElement('canvas');c.width=1400;c.height=300;const g=c.getContext('2d');
+  const a=[T.defaultAnimator({props:{y:-40,opacity:0,scale:0.9},delay:0.03,duration:0.5})];
+  T.drawText(g,L,0.1,{x:20,y:60,animators:a});
+  const t=performance.now();for(let f=0;f<60;f++){g.clearRect(0,0,1400,300);T.drawText(g,L,f/60,{x:20,y:60,animators:a});g.getImageData(0,0,1,1);}
+  return {perFrame:+((performance.now()-t)/60).toFixed(2)};});
+document.title='DIAG-DONE';
+}catch(e){document.title='DIAG-ERR';}
+</script></body></html>

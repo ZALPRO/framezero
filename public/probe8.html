@@ -1,0 +1,75 @@
+<!doctype html><html><head><meta charset="utf-8"><title>p8</title></head><body>
+<pre id="o"></pre><script type="module">
+const o=document.getElementById('o');const log=(...a)=>{o.textContent+=a.join(' ')+'\n';};
+const R={};
+import { GL2Compositor } from '/js/render/gl2.js';
+import { Canvas2DCompositor } from '/js/render/canvas2d.js';
+
+const W=220,H=220;
+const mk=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c;};
+
+/* The orb raster exactly as shapes.js would produce it. */
+const orb=mk(W,H);{const g=orb.getContext('2d');g.clearRect(0,0,W,H);g.fillStyle='#00e5a0';
+  g.beginPath();g.ellipse(W/2,H/2,W/2,H/2,0,0,Math.PI*2);g.fill();}
+
+const glC=mk(W,H), c2C=mk(W,H);
+const gl=new GL2Compositor(); await gl.init(glC,{width:W,height:H,dpr:1});
+const c2=new Canvas2DCompositor(); await c2.init(c2C,{width:W,height:H,dpr:1});
+
+/* Pull a handle's pixels out of each backend.
+   GL stores PREMULTIPLIED (premultipliedAlpha:true), Canvas2D's getImageData
+   returns STRAIGHT — so un-premultiply the GL side before comparing. */
+function glPixels(h){
+  const c=gl._textureToCanvas(h);
+  const g=c.getContext('2d',{willReadFrequently:true});
+  const d=g.getImageData(0,0,h.w,h.h).data;
+  const out=new Uint8ClampedArray(d.length);
+  for(let i=0;i<d.length;i+=4){
+    const a=d[i+3]; out[i+3]=a;
+    if(a>0){const k=255/a;out[i]=Math.min(255,d[i]*k);out[i+1]=Math.min(255,d[i+1]*k);out[i+2]=Math.min(255,d[i+2]*k);}
+  }
+  return out;
+}
+const c2Pixels=(h)=>h.canvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,h.w,h.h).data;
+
+function cmp(a,b,label){
+  let sum=0,max=0,n=0,aSum=0,aMax=0;
+  for(let i=0;i<a.length;i+=4){
+    for(let k=0;k<3;k++){const d=Math.abs(a[i+k]-b[i+k]);sum+=d;if(d>max)max=d;n++;}
+    const da=Math.abs(a[i+3]-b[i+3]);aSum+=da;if(da>aMax)aMax=da;
+  }
+  const r={label,meanRGB:+(sum/n).toFixed(3),maxRGB:max,meanAlpha:+(aSum/(n)).toFixed(3),maxAlpha:aMax};
+  log(`${label.padEnd(26)} RGB mean=${String(r.meanRGB).padStart(7)} max=${String(r.maxRGB).padStart(4)}   A mean=${String(r.meanAlpha).padStart(7)} max=${String(r.maxAlpha).padStart(4)}`);
+  return r;
+}
+
+const FX=[
+  ['gaussianBlur r=14',{id:'gaussianBlur',params:{radius:14,quality:9}}],
+  ['gaussianBlur r=0', {id:'gaussianBlur',params:{radius:0,quality:9}}],
+  ['bloom',            {id:'bloom',params:{threshold:0.35,intensity:0.9,radius:18,softness:0.6}}],
+  ['brightnessContrast',{id:'brightnessContrast',params:{brightness:0,contrast:0,saturation:0}}],
+];
+
+log('— effect output compared BEFORE any compositing (straight alpha, un-premultiplied GL) —');
+R.rows=[];
+for(const [label,fx] of FX){
+  let hg=gl.updateLayerSource('orb',orb); hg=gl.applyEffect(hg,fx,null,0);
+  let hc=c2.updateLayerSource('orb',orb); hc=c2.applyEffect(hc,fx,null,0);
+  R.rows.push(cmp(glPixels(hg),c2Pixels(hc),label));
+}
+
+/* Sample the blurred orb's alpha ramp — a slice through the centre. */
+log('\n— alpha/RGB profile across y=110, blurred orb (x = 0,40,80,100,110,120,140,180,219) —');
+let hg=gl.updateLayerSource('orb2',orb); hg=gl.applyEffect(hg,{id:'gaussianBlur',params:{radius:14,quality:9}},null,0);
+let hc=c2.updateLayerSource('orb2',orb); hc=c2.applyEffect(hc,{id:'gaussianBlur',params:{radius:14,quality:9}},null,0);
+const A=glPixels(hg),B=c2Pixels(hc);
+R.profile=[];
+for(const x of [0,40,80,100,110,120,140,180,219]){
+  const i=(110*W+x)*4;
+  const row=`x=${String(x).padStart(3)}  gl rgba=[${A[i]},${A[i+1]},${A[i+2]},${A[i+3]}]   c2d rgba=[${B[i]},${B[i+1]},${B[i+2]},${B[i+3]}]`;
+  log('  '+row); R.profile.push({x,gl:[A[i],A[i+1],A[i+2],A[i+3]],c2d:[B[i],B[i+1],B[i+2],B[i+3]]});
+}
+
+log('\ngl shader errors:',JSON.stringify(gl.shaderErrors?gl.shaderErrors():[]));
+window.__P8__=R;document.title='P8-DONE';
+</script></body></html>

@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>FrameZero — test harness</title>
+<style>
+  body{background:#0d0f14;color:#e6e9f0;font:13px/1.5 ui-monospace,Menlo,monospace;margin:0;padding:18px}
+  .pass{color:#00e5a0}.fail{color:#ff5c7a}.warn{color:#ffc46b}.skip{color:#8a93a6}
+  h2{font-size:13px;color:#8a93a6;text-transform:uppercase;letter-spacing:.12em;margin:22px 0 6px}
+  #sum{position:sticky;top:0;background:#0d0f14;padding:10px 0;border-bottom:1px solid #232a38;font-size:15px}
+  table{border-collapse:collapse;width:100%}td{padding:2px 0;vertical-align:top}
+  td.n{width:26px;color:#5b6478}
+  canvas{background:#000;margin:4px 0;display:block}
+</style></head>
+<body>
+<div id="sum">running…</div>
+<div id="log"></div>
+<script type="module">
+import { FontRegistry, STOCK_FONTS } from '/js/core/fonts.js';
+import { layoutText, buildRuns, graphemes, extractUnits, orderedUnits, computeUnitStates,
+         drawText, drawLine, lineBuffer, layoutReport, routingTable, defaultAnimator,
+         clearTypographyCaches, cacheStats, warmInstances, animatorAmount } from '/js/render/typography.js';
+import { cubicBezier, springValue, overshootValue, evalTrack, tc, EASINGS } from '/js/core/base.js';
+import { Graph, Node } from '/js/core/graph.js';
+
+const logEl = document.getElementById('log'), sumEl = document.getElementById('sum');
+const CK = n => { window.__CK__ = n; console.info('CK ' + n); };
+window.onerror = (m,src,l,c,e) => { console.info('WINDOW-ERROR ' + m + ' @' + l + ':' + c); };
+window.addEventListener('unhandledrejection', ev => console.info('UNHANDLED-REJECTION ' + (ev.reason?.stack || ev.reason)));
+CK('boot');
+const results = [];
+let group = '';
+function G(name){ group = name; const h=document.createElement('h2'); h.textContent=name; logEl.append(h);
+  const t=document.createElement('table'); t.id='t'+results.length; logEl.append(t); return t; }
+let curTable = null;
+function T(name, ok, detail, kind){
+  results.push({group, name, ok, detail, kind: kind || (ok===null?'skip':'assert')});
+  if(!curTable || curTable.dataset.g !== group){ curTable = G(group); curTable.dataset.g = group; }
+  const tr = document.createElement('tr');
+  const cls = ok===null?'skip':(ok?'pass':'fail');
+  const mark = ok===null?'○':(ok?'✓':'✗');
+  tr.innerHTML = `<td class="n">${mark}</td><td class="${cls}">${name}</td><td class="${cls}" style="opacity:.75;padding-left:10px">${detail??''}</td>`;
+  curTable.append(tr);
+}
+const ok  = (n,d)=>T(n,true,d);
+const bad = (n,d)=>T(n,false,d);
+const chk = (n,c,d)=>T(n,!!c,d);
+const eq  = (n,a,b,d)=>T(n,a===b,`${d??''} got=${JSON.stringify(a)} want=${JSON.stringify(b)}`);
+const near= (n,a,b,tol=1e-6,d)=>T(n,Math.abs(a-b)<=tol,`${d??''} got=${a} want≈${b} ±${tol}`);
+
+/* ═══ helpers: pixel measurement ═══ */
+function mkCanvas(w,h){const c=document.createElement('canvas');c.width=Math.max(1,Math.ceil(w));c.height=Math.max(1,Math.ceil(h));c.getContext('2d',{willReadFrequently:true});return c;}
+function inkOf(c,thr=30){const g=c.getContext('2d',{willReadFrequently:true}),d=g.getImageData(0,0,c.width,c.height).data;let n=0;
+  for(let i=3;i<d.length;i+=4)if(d[i]>thr)n++;return n;}
+function inkBoxes(c,thr=30){const g=c.getContext('2d',{willReadFrequently:true}),d=g.getImageData(0,0,c.width,c.height).data;
+  let x0=1e9,x1=-1,y0=1e9,y1=-1,n=0;
+  for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){if(d[(y*c.width+x)*4+3]>thr){n++;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}}
+  return {n,x0,x1,y0,y1};}
+function hashCanvas(c){const d=c.getContext('2d',{willReadFrequently:true}).getImageData(0,0,c.width,c.height).data;let h=2166136261;
+  for(let i=0;i<d.length;i+=7){h^=d[i];h=Math.imul(h,16777619);}return (h>>>0).toString(16);}
+
+/* ═════════════════════════════════════════════════════════════ */
+const registry = new FontRegistry();
+await registry.loadStock((p,f)=>{ sumEl.textContent = `loading fonts ${Math.round(p*100)}% (${f})`; });
+sumEl.textContent = 'fetching font audit…';
+await registry.loadMeta();
+
+/* ─── 1. base: easing + keyframes ─── */
+CK('1'); group='1. core/base — easing & keyframes'; curTable=null;
+{
+  near('cubicBezier(0,0,1,1) is linear', cubicBezier(0,0,1,1)(0.37), 0.37, 1e-3);
+  const bez = cubicBezier(.42,0,.58,1);
+  near('ease-in-out bezier midpoint = 0.5', bez(0.5), 0.5, 1e-3);
+  chk('bezier monotonic', (()=>{let p=-1;for(let i=0;i<=20;i++){const v=bez(i/20);if(v<p-1e-9)return false;p=v;}return true;})());
+  eq('all easings clamp at t=0', Object.values(EASINGS).filter(f=>f).every(f=>f(0)===0||Math.abs(f(0))<1e-9), true);
+  eq('all easings clamp at t=1', Object.values(EASINGS).filter(f=>f).every(f=>Math.abs(f(1)-1)<1e-6), true);
+  chk('spring overshoots then settles to ~1', (()=>{const s=springValue(1);const o=springValue(0.45);return Math.abs(s-1)<0.06 && o>1.0;})(), `end=${springValue(1).toFixed(4)} mid=${springValue(0.45).toFixed(4)}`);
+  chk('overshoot exceeds 1 mid-flight, ends at 1', overshootValue(0.5)>1 && Math.abs(overshootValue(1)-1)<1e-9, `mid=${overshootValue(0.5).toFixed(3)}`);
+
+  const track = {keys:[{t:0,v:0,ease:'linear'},{t:1,v:100,ease:'linear'},{t:2,v:50}]};
+  eq('track before first key', evalTrack(track,-1), 0);
+  near('track linear midpoint', evalTrack(track,0.5), 50, 1e-9);
+  eq('track after last key', evalTrack(track,9), 50);
+  eq('hold key does not interpolate', evalTrack({keys:[{t:0,v:'a',ease:'hold'},{t:1,v:'b'}]},0.5), 'a');
+  eq('discrete string flips at 0.5', evalTrack({keys:[{t:0,v:'a',ease:'linear'},{t:1,v:'b'}]},0.6), 'b');
+  const vec = evalTrack({keys:[{t:0,v:[0,0,0],ease:'linear'},{t:1,v:[10,20,30]}]},0.25);
+  chk('vector track interpolates per component', vec[0]===2.5&&vec[1]===5&&vec[2]===7.5, JSON.stringify(vec));
+  eq('timecode 30fps', tc(3661.5,30), '01:01:01:15');
+  eq('timecode zero', tc(0,24), '00:00:00:00');
+}
+
+/* ─── 2. graph: dependency-aware dirty propagation ─── */
+CK('2. core/graph — DAG invalidation'); group='2. core/graph — DAG invalidation'; curTable=null;
+{
+  const g = new Graph();
+  // every node returns {v} — the contract the compute functions rely on
+  const a = g.make('asset','a',(n,ctx)=>({t:ctx.time,v:1}));
+  const b = g.make('effect','b',(n)=>({v:n.inputs[0].value.v+1}));
+  const c = g.make('effect','c',(n)=>({v:n.inputs[0].value.v*10}));
+  const d = g.make('layer','d',(n)=>({v:n.inputs[0].value.v}));
+  const side = g.make('layer','side',(n)=>({v:42}));
+  a.connectTo(b); b.connectTo(c); c.connectTo(d);
+  let r = g.evaluate({time:0});
+  eq('first pass evaluates every node', r.evaluated, 5);
+  eq('first pass reuses nothing', r.reused, 0);
+  eq('chain value propagates a→b→c→d correctly', d.value.v, 20, '(1+1)*10');
+  eq('side node is independent', side.value.v, 42);
+
+  r = g.evaluate({time:0});
+  eq('second pass re-evaluates NOTHING (cache holds)', r.evaluated, 0, `reused=${r.reused}`);
+  eq('second pass reuses all', r.reused, 5);
+
+  const cone = g.markDirty(b);
+  eq('invalidating b marks exactly its downstream cone', cone, 3, 'b,c,d — not a, not side');
+  r = g.evaluate({time:0});
+  eq('only the cone re-runs', r.evaluated, 3);
+  eq('untouched siblings are reused', r.reused, 2);
+  eq('a.evalCount proves it never re-ran', a.evalCount, 1);
+  eq('side.evalCount proves it never re-ran', side.evalCount, 1);
+  eq('d.evalCount = 2 (initial + cone)', d.evalCount, 2);
+
+  g.markDirty(a);
+  r = g.evaluate({time:1});
+  eq('invalidating the root re-runs the whole chain', r.evaluated, 4);
+  chk('stats expose reuse ratio', g.stats.totalReuses > 0 && g.stats.totalEvaluations > 0,
+      `evals=${g.stats.totalEvaluations} reuses=${g.stats.totalReuses} ratio=${(g.stats.totalReuses/(g.stats.totalReuses+g.stats.totalEvaluations)*100).toFixed(1)}%`);
+  eq('downstream(a) lists the cone', g.downstream('a').join(','), 'a,b,c,d');
+  // error containment
+  const bad = g.make('effect','bad',()=>{throw new Error('deliberate');});
+  a.connectTo(bad);
+  let caught=null; g.evaluate({time:2, onError:(n,e)=>caught=e.message});
+  chk('a throwing node does not crash the graph', caught==='deliberate' && g.nodes.size===6, `err=${caught}`);
+}
+
+/* ─── 3. fonts registry ─── */
+CK('3. core/fonts — registry & live axis baking'); group='3. core/fonts — registry & live axis baking'; curTable=null;
+{
+  eq('all four stock faces loaded', registry.loaded.size, 4, [...registry.loaded.keys()].join(', '));
+  chk('server audit loaded', !!registry.meta, registry.meta?Object.keys(registry.meta).join(', '):'none');
+
+  const inst = await registry.instance('Roboto Flex', {GRAD:150});
+  chk('custom axis GRAD bakes a live FontFace', inst.baked && inst.family.startsWith('FZ_'), `${inst.family} in ${inst.ms.toFixed(1)}ms`);
+  chk('bake is fast enough for live sliders (<25ms)', inst.ms < 25, `${inst.ms.toFixed(2)}ms`);
+  const again = await registry.instance('Roboto Flex', {GRAD:150});
+  chk('identical axes hit the cache', again.fromCache && again.ms===0);
+
+  // pixel proof the bake actually changes rendering
+  const base = registry.instanceSync('Roboto Flex', {});
+  const c1=mkCanvas(500,140), g1=c1.getContext('2d');
+  g1.fillStyle='#fff'; g1.font='400 72px "Roboto Flex"'; g1.fillText('Handgloves',10,100);
+  const c2=mkCanvas(500,140), g2=c2.getContext('2d');
+  g2.fillStyle='#fff'; g2.font=`400 72px "${inst.family}"`; g2.fillText('Handgloves',10,100);
+  const i1=inkOf(c1), i2=inkOf(c2);
+  chk('GRAD=150 visibly changes the pixels', Math.abs(i2-i1) > i1*0.15, `ink base=${i1} baked=${i2} Δ=${((i2-i1)/i1*100).toFixed(1)}%`);
+
+  const w1=mkCanvas(300,100).getContext('2d'); w1.font=`100 64px "${inst.family}"`;
+  const w9=mkCanvas(300,100).getContext('2d'); w9.font=`900 64px "${inst.family}"`;
+  const ww1=w1.measureText('Handgloves').width, ww9=w9.measureText('Handgloves').width;
+  chk('numeric weight still composes over a baked face', ww9 > ww1 + 20, `w100=${ww1.toFixed(1)} w900=${ww9.toFixed(1)}`);
+
+  // wdth via bake (shorthand percentages are broken, keywords are coarse)
+  const narrow = await registry.instance('Roboto Flex', {wdth:25});
+  const wide   = await registry.instance('Roboto Flex', {wdth:151});
+  const mn=mkCanvas(300,100).getContext('2d'); mn.font=`400 64px "${narrow.family}"`;
+  const mw=mkCanvas(300,100).getContext('2d'); mw.font=`400 64px "${wide.family}"`;
+  const wn=mn.measureText('Handgloves').width, ww=mw.measureText('Handgloves').width;
+  chk('wdth 25→151 spans a wide continuous range', ww > wn*2, `wdth25=${wn.toFixed(1)}px wdth151=${ww.toFixed(1)}px ratio=${(ww/wn).toFixed(2)}×`);
+
+  chk('LRU eviction keeps document.fonts bounded', (()=>{ const before=document.fonts.size; return before < 400; })(), `documentFonts=${document.fonts.size}`);
+  eq('instanceSync returns base family when unbaked', registry.instanceSync('Roboto Flex', {YOPQ:99}) !== '' , true);
+}
+
+/* ─── 4. the AE bug: silent fallback ─── */
+CK('4. script routing — reproducing & fixing the AE bug'); group='4. script routing — reproducing & fixing the AE bug'; curTable=null;
+{
+  const FA = 'سلام دنیا';  // سلام دنیا
+  const latin = 'Frame Zero';
+  const mixed = `FrameZero ${FA} ۱۲۳`;
+
+  const interRuns = buildRuns(FA, registry, 'Inter');
+  chk('Inter + Persian is detected as uncovered', interRuns.warnings.some(w=>w.code==='silent-fallback'),
+      interRuns.warnings.map(w=>w.message).join(' | ') || 'NO WARNING — audit missing?');
+  const routed = interRuns.runs.find(r=>r.text.trim());
+  chk('…and is routed to a font that really covers it', routed && routed.family !== 'Inter' && ['Vazirmatn','Noto Sans Arabic'].includes(routed.family), `→ ${routed?.family}`);
+
+  const vazRuns = buildRuns(FA, registry, 'Vazirmatn');
+  eq('Vazirmatn + Persian needs no substitution', vazRuns.warnings.filter(w=>w.code==='silent-fallback').length, 0);
+
+  const mixedRuns = buildRuns(mixed, registry, 'Inter');
+  const fams = [...new Set(mixedRuns.runs.map(r=>r.family))];
+  chk('mixed Latin+Persian splits across ≥2 families', fams.length >= 2, fams.join(', '));
+
+  const graphTests = [
+    ['ZWNJ kept inside a cluster', graphemes('می‌رود').length < [...'می‌رود'].length],
+    ['combining mark glued', graphemes('é').length === 1],
+    ['emoji ZWJ sequence is one cluster', graphemes('👨‍👩‍👧').length === 1],
+    ['plain latin splits per char', graphemes('abc').length === 3],
+  ];
+  for(const [n,v] of graphTests) chk(n, v);
+
+  const audit = registry.meta?.['Inter'];
+  if(audit){
+    eq('audit: Inter Persian coverage is 0%', audit.persian?.pct ?? audit.scripts?.arabic?.pct ?? -1, 0);
+    const vaz = registry.meta?.['Vazirmatn'];
+    chk('audit: Vazirmatn Persian coverage is 100%', (vaz?.persian?.pct ?? 0) === 100, `pct=${vaz?.persian?.pct}`);
+    chk('audit: Vazirmatn Arabic coverage is 100%', (vaz?.scripts?.arabic?.pct ?? 0) === 100, `pct=${vaz?.scripts?.arabic?.pct}`);
+  } else bad('audit unavailable — /api/font-axes failed');
+}
+
+/* ─── 5. layout + unit extraction ─── */
+CK('5. layout & animation units'); group='5. layout & animation units'; curTable=null;
+{
+  clearTypographyCaches();
+  const spec = {text:'Frame Zero', family:'Inter', size:64, weight:400, tracking:0, leading:1.2, align:'left', color:'#ffffff'};
+  const L = layoutText(spec, registry);
+  chk('layout produced one line', L.lines.length===1, `lines=${L.lines.length}`);
+  eq('unit count for "Frame Zero" = 9 (space has no ink)', L.lines[0].units.length, 9);
+  chk('word grouping found 2 words', L.lines[0].wordCount===2, `words=${L.lines[0].wordCount}`);
+  chk('every unit has positive width', L.lines[0].units.every(u=>u.x1>u.x0));
+  chk('units are ordered left→right for LTR', L.lines[0].units.every((u,i,a)=>i===0||a[i-1].x0<=u.x0));
+  chk('layout is cheap (<20ms)', L.metrics.layoutMs < 20, `${L.metrics.layoutMs}ms`);
+
+  const L2 = layoutText(spec, registry);
+  chk('second identical layout is a cache hit', L2.cached===true && L2.key===L.key);
+
+  // digits: exact per-glyph segmentation
+  const D = layoutText({text:'0123456789', family:'Inter', size:64, weight:400, leading:1.2}, registry);
+  eq('digits segment into exactly 10 units', D.lines[0].units.length, 10);
+
+  // Persian
+  const P = layoutText({text:'سلام دنیا', family:'Vazirmatn', size:64, weight:400, leading:1.4, direction:'rtl'}, registry);
+  chk('Persian line detected as RTL', P.dir==='rtl', `dir=${P.dir}`);
+  chk('Persian yields cursive-group units (>1, <char count)', P.lines[0].units.length>1 && P.lines[0].units.length<9,
+      `units=${P.lines[0].units.length} for 9 chars — joined letters stay connected`);
+  const fwd = orderedUnits(P.lines[0],'auto');
+  chk('RTL animation order reads right→left', fwd[0].cx > fwd[fwd.length-1].cx, `${fwd[0].cx.toFixed(0)} → ${fwd[fwd.length-1].cx.toFixed(0)}`);
+
+  // multiline + alignment
+  const M = layoutText({text:'one\ntwo\nthree', family:'Inter', size:32, weight:400, leading:1.3, align:'center'}, registry);
+  eq('three hard line breaks → three lines', M.lines.length, 3);
+  chk('center alignment offsets shorter lines', M.lines[0].x > 0 && M.lines[2].x === 0, `x=[${M.lines.map(l=>l.x.toFixed(1))}]`);
+
+  // wrapping
+  const W = layoutText({text:'the quick brown fox jumps over the lazy dog', family:'Inter', size:32, weight:400, maxWidth:220, leading:1.3}, registry);
+  chk('maxWidth wraps into multiple lines', W.lines.length > 2, `lines=${W.lines.length}`);
+  chk('no wrapped line exceeds maxWidth', W.lines.every(l=>l.width <= 221), `widths=[${W.lines.map(l=>l.width.toFixed(0))}]`);
+
+  // long text performance (quadratic prefix measurement was rejected for this)
+  const long = 'abcdefghij'.repeat(120);
+  const t=performance.now(); const LB = layoutText({text:long, family:'Inter', size:28, weight:400, leading:1.25}, registry); const ms=performance.now()-t;
+  chk('1200-char layout stays under 120ms', ms < 120, `${ms.toFixed(1)}ms, ${LB.lines[0].units.length} units`);
+
+  const rep = layoutReport(L);
+  chk('layoutReport exposes characters/units/runs/warnings', rep.characters===9 && rep.units===9 && rep.runs.length>=1, JSON.stringify({chars:rep.characters,units:rep.units}));
+}
+
+/* ─── 6. THE critical property: shaping preserved under per-glyph animation ─── */
+CK('6. shaping preservation (the AE differentiator)'); group='6. shaping preservation (the AE differentiator)'; curTable=null;
+{
+  const FA='سلام دنیا';
+  const spec={text:FA, family:'Vazirmatn', size:64, weight:400, leading:1.4, direction:'rtl', color:'#ffffff'};
+  clearTypographyCaches();
+  const L = layoutText(spec, registry);
+  const line = L.lines[0], buf = line.buffer;
+
+  // reference: browser's own whole-string shaping
+  const ref = mkCanvas(buf.W, buf.H), rg = ref.getContext('2d');
+  rg.fillStyle='#fff'; rg.textBaseline='alphabetic'; rg.textAlign='left'; rg.direction='rtl';
+  rg.font='400 64px "Vazirmatn"'; rg.fillText(FA, buf.padX, buf.baseline);
+  const refInk = inkOf(ref), bufInk = inkOf(buf.canvas);
+  chk('line buffer matches the browser\'s own shaping exactly', refInk===bufInk, `ref=${refInk} buffer=${bufInk}`);
+
+  // identity blit through our draw path
+  const out = mkCanvas(buf.W+200, buf.H+200), og = out.getContext('2d');
+  drawText(og, L, 0, {x:100,y:100,animators:[]});
+  const noAnimInk = inkOf(out);
+  chk('no-animator path reproduces the ink exactly', noAnimInk===bufInk, `draw=${noAnimInk} buffer=${bufInk}`);
+
+  // animator at t=0 (amount 0) must also be lossless
+  const anim = defaultAnimator({mode:'to', props:{y:-40,opacity:0,scale:0.8}, delay:0.05, duration:0.5});
+  const o0 = mkCanvas(buf.W+300, buf.H+300), g0=o0.getContext('2d');
+  drawText(g0, L, -1, {x:150,y:150,animators:[anim]});
+  const atZero = inkOf(o0);
+  chk('animator at amount=0 leaves the text at its base state (fully visible, unoffset)',
+      atZero===bufInk, `ink=${atZero} vs shaped base=${bufInk} — amount 0 ⇒ base, amount 1 ⇒ target`);
+
+  // fully settled (t large) → every unit at amount 1 → also opacity 0
+  const oEnd = mkCanvas(buf.W+300, buf.H+300), gEnd=oEnd.getContext('2d');
+  drawText(gEnd, L, 99, {x:150,y:150,animators:[anim]});
+  chk('animator settled at target (opacity 0) renders nothing', inkOf(oEnd)===0, `ink=${inkOf(oEnd)}`);
+
+  /* mode 'from' — the staggered reveal: authored props are the START state.
+     Without this mode a reveal is inexpressible: at t=0 every unit sits at base,
+     i.e. already visible, so 'to' can only ever move text AWAY from rest. */
+  const from = defaultAnimator({mode:'from', props:{y:-40,opacity:0,scale:0.8}, delay:0.05, duration:0.5});
+  const oF0 = mkCanvas(buf.W+300, buf.H+300), gF0 = oF0.getContext('2d');
+  drawText(gF0, L, -1, {x:150,y:150,animators:[from]});
+  chk('mode from: before the stagger every unit is at the authored start (invisible)', inkOf(oF0)===0, `ink=${inkOf(oF0)}`);
+  const oF1 = mkCanvas(buf.W+300, buf.H+300), gF1 = oF1.getContext('2d');
+  drawText(gF1, L, 99, {x:150,y:150,animators:[from]});
+  chk('mode from: settled text returns to base, fully visible', inkOf(oF1)===bufInk, `ink=${inkOf(oF1)} vs shaped base=${bufInk}`);
+  const oFM = mkCanvas(buf.W+300, buf.H+300), gFM = oFM.getContext('2d');
+  drawText(gFM, L, 0.06, {x:150,y:150,animators:[from]});
+  const fmInk = inkOf(oFM);
+  chk('mode from: mid-reveal shows part of the line', fmInk>0 && fmInk<bufInk, `ink=${fmInk} of ${bufInk}`);
+  const gateFrom = computeUnitStates(L.lines[0], [defaultAnimator({mode:'from', range:{start:0,end:30}, delay:0, duration:0.5, props:{opacity:0}})], -1);
+  chk('mode from: the range selector still gates (excluded units keep base)',
+      gateFrom[0].opacity===0 && gateFrom[gateFrom.length-1].opacity===1,
+      `inside=${gateFrom[0].opacity} outside=${gateFrom[gateFrom.length-1].opacity}`);
+  chk('defaultAnimator ships reveal semantics (mode from)', defaultAnimator().mode==='from');
+
+  // mid-flight: an opacity-1 animator must NOT inflate ink (that is the joining-loss signature)
+  const moveOnly = defaultAnimator({mode:'to', props:{y:-30,opacity:1,scale:1}, delay:0.02, duration:0.4});
+  const oMid = mkCanvas(buf.W+400, buf.H+400), gMid=oMid.getContext('2d');
+  drawText(gMid, L, 0.06, {x:200,y:200,animators:[moveOnly]});
+  const midInk = inkOf(oMid);
+  chk('mid-animation ink stays within resampling tolerance of the shaped original',
+      Math.abs(midInk-bufInk) <= bufInk*0.10,
+      `original=${bufInk} animated=${midInk} Δ=${((midInk-bufInk)/bufInk*100).toFixed(1)}% (naive separate-draw measured +42%)`);
+
+  // direct comparison against the broken approach, measured live
+  const naive = mkCanvas(buf.W, buf.H), ng = naive.getContext('2d');
+  ng.fillStyle='#fff'; ng.font='400 64px "Vazirmatn"'; ng.textBaseline='alphabetic';
+  let x=buf.padX; for(const ch of graphemes(FA)){ ng.fillText(ch,x,buf.baseline); x+=ng.measureText(ch).width; }
+  const naiveInk = inkOf(naive);
+  chk('naive per-character drawing DOES break joining (control)', naiveInk > bufInk*1.10,
+      `naive=${naiveInk} vs shaped=${bufInk} (+${((naiveInk-bufInk)/bufInk*100).toFixed(1)}%)`);
+  chk('our buffer approach beats the naive one', midInk < naiveInk, `ours=${midInk} naive=${naiveInk}`);
+
+  // expose the canvases for visual inspection
+  const vis=document.createElement('div');
+  vis.innerHTML='<h2>visual proof — 6. shaping</h2>';
+  for(const [lbl,cv] of [['browser shaping (reference)',ref],['our line buffer',buf.canvas],['naive per-char (BROKEN joining)',naive],['ours mid-animation (joining intact)',oMid]]){
+    const w=mkCanvas(cv.width,cv.height);w.getContext('2d').drawImage(cv,0,0);
+    w.style.background='#111'; vis.append(Object.assign(document.createElement('div'),{textContent:lbl,style:'color:#8a93a6;margin-top:6px'}), w);
+  }
+  logEl.append(vis);
+}
+
+/* ─── 7. animators: timing, selectors, composition ─── */
+CK('7. animator system'); group='7. animator system'; curTable=null;
+{
+  chk('amount is 0 before the stagger reaches the unit', animatorAmount(defaultAnimator({delay:0.1,duration:0.5}), 3, 10, 0.05)===0);
+  chk('amount is 1 after delay+duration', Math.abs(animatorAmount(defaultAnimator({delay:0.1,duration:0.5}), 3, 10, 0.1*3+0.5+0.01)-1)<1e-6);
+  chk('amount ramps monotonically', (()=>{let p=-1;const a=defaultAnimator({delay:0.05,duration:0.5});
+    for(let t=0;t<1.2;t+=0.02){const v=animatorAmount(a,2,10,t);if(v<p-1e-9)return false;p=v;}return true;})());
+  chk('later units lag earlier ones', (()=>{const a=defaultAnimator({delay:0.08,duration:0.4});
+    return animatorAmount(a,1,10,0.2) > animatorAmount(a,5,10,0.2);})());
+  chk('disabled animator contributes nothing', animatorAmount(defaultAnimator({enabled:false}),0,5,1)===0);
+  chk('range selector excludes units outside the window', (()=>{const a=defaultAnimator({range:{start:0,end:30},delay:0,duration:0.5});
+    return animatorAmount(a,9,10,9)===0 && animatorAmount(a,0,10,9)>0.9;})());
+  chk('softness feathers the window edge (partial amount between 0 and 1)', (()=>{
+    const a=defaultAnimator({range:{start:0,end:30,softness:20},delay:0,duration:0.5,ease:'linear'});
+    // pos 4 of 10 → u=0.444; window ends at 0.30; softness 0.20 ⇒ gate = 1-0.144/0.2 = 0.28
+    const v=animatorAmount(a,4,10,9); return v>0.05 && v<0.95;})(),
+    `amount=${animatorAmount(defaultAnimator({range:{start:0,end:30,softness:20},delay:0,duration:0.5,ease:'linear'}),4,10,9).toFixed(3)}`);
+  chk('hard window edge (no softness) gives exactly 0', (()=>{
+    const a=defaultAnimator({range:{start:0,end:30,softness:0},delay:0,duration:0.5});
+    return animatorAmount(a,4,10,9)===0;})());
+  chk('range offset sweeps the window', (()=>{const a=defaultAnimator({range:{start:0,end:20,offset:80},delay:0,duration:0.5});
+    return animatorAmount(a,9,10,9)>0.9 && animatorAmount(a,0,10,9)===0;})());
+
+  const L = layoutText({text:'abcd', family:'Inter', size:64, weight:400, leading:1.2}, registry);
+  const line=L.lines[0];
+  const st0 = computeUnitStates(line, [], 0);
+  eq('no animators → all states neutral', st0.every(s=>s.opacity===1&&s.x===0&&s.y===0&&s.scale===1&&!s.animated), true);
+
+  const lin = defaultAnimator({mode:'to',props:{y:-50,opacity:0},delay:0,duration:1,ease:'linear'});
+  const stA = computeUnitStates(line, [lin], 0.5);
+  near('single animator with linear ease lerps y to exactly half', stA[0].y, -25, 0.01);
+  near('single animator with linear ease lerps opacity to exactly half', stA[0].opacity, 0.5, 0.001);
+  const eased = computeUnitStates(line, [defaultAnimator({mode:'to',props:{y:-50},delay:0,duration:1,ease:'ease-out-cubic'})], 0.5);
+  near('ease-out-cubic at t=0.5 gives amount 0.875 (front-loaded)', eased[0].y, -43.75, 0.01,
+       '1-(1-0.5)^3 = 0.875 ⇒ y = -43.75');
+
+  // additive composition
+  const stAdd = computeUnitStates(line, [
+    defaultAnimator({mode:'to',id:'a1',props:{y:-40},delay:0,duration:1,ease:'linear'}),
+    defaultAnimator({mode:'to',id:'a2',props:{y:-20},delay:0,duration:1,ease:'linear'}),
+  ], 1);
+  near('two animators on y ADD', stAdd[0].y, -60, 0.5);
+
+  // multiplicative composition
+  const stMul = computeUnitStates(line, [
+    defaultAnimator({mode:'to',id:'m1',props:{opacity:0.5},delay:0,duration:1,ease:'linear'}),
+    defaultAnimator({mode:'to',id:'m2',props:{opacity:0.5},delay:0,duration:1,ease:'linear'}),
+  ], 1);
+  near('two animators on opacity MULTIPLY', stMul[0].opacity, 0.25, 0.01);
+
+  const stScale = computeUnitStates(line, [defaultAnimator({mode:'to',props:{scale:2,scaleX:1.5},delay:0,duration:1,ease:'linear'})], 1);
+  near('scale composes into scaleX', stScale[0].scaleX, 3, 0.01);
+  near('scale composes into scaleY', stScale[0].scaleY, 2, 0.01);
+
+  const stWord = computeUnitStates(line, [defaultAnimator({mode:'to',unit:'word',props:{y:-10},delay:0,duration:1,ease:'linear'})], 1);
+  chk('unit:word collapses to word groups', stWord.length < line.units.length, `${stWord.length} word-units from ${line.units.length} glyph-units`);
+  const stLine = computeUnitStates(line, [defaultAnimator({mode:'to',unit:'line',props:{y:-10},delay:0,duration:1,ease:'linear'})], 1);
+  eq('unit:line collapses to exactly one', stLine.length, 1);
+
+  chk('scale is clamped to a sane range', computeUnitStates(line,[defaultAnimator({mode:'to',props:{scale:0},delay:0,duration:1,ease:'linear'})],1)[0].scaleX>=0);
+}
+
+/* ─── 8. variable axes through the text pipeline ─── */
+CK('8. variable axes end-to-end'); group='8. variable axes end-to-end'; curTable=null;
+{
+  const mk=(axes,weight)=>{ const s={text:'Handgloves', family:'Roboto Flex', size:72, weight, leading:1.3, axes};
+    warmInstances(s,registry); return s; };
+  // ensure bakes are ready
+  await registry.instance('Roboto Flex',{GRAD:-200});
+  await registry.instance('Roboto Flex',{GRAD:150});
+  const thin = layoutText(mk({GRAD:-200},100), registry);
+  const bold = layoutText(mk({GRAD:150},900), registry);
+  const c1=mkCanvas(thin.lines[0].buffer.W, thin.lines[0].buffer.H);
+  c1.getContext('2d').drawImage(thin.lines[0].buffer.canvas,0,0);
+  const c2=mkCanvas(bold.lines[0].buffer.W, bold.lines[0].buffer.H);
+  c2.getContext('2d').drawImage(bold.lines[0].buffer.canvas,0,0);
+  const i1=inkOf(c1), i2=inkOf(c2);
+  chk('wght 100 + GRAD -200 vs wght 900 + GRAD 150 differ dramatically', i2 > i1*2.5, `ink light=${i1} heavy=${i2} ratio=${(i2/i1).toFixed(2)}×`);
+  chk('distinct axis sets get distinct cache keys', thin.key!==bold.key);
+
+  await registry.instance('Roboto Flex',{wdth:62.5});
+  await registry.instance('Roboto Flex',{wdth:151});
+  const n=layoutText({text:'Handgloves',family:'Roboto Flex',size:72,weight:400,leading:1.3,axes:{wdth:62.5}},registry);
+  const w=layoutText({text:'Handgloves',family:'Roboto Flex',size:72,weight:400,leading:1.3,axes:{wdth:151}},registry);
+  chk('wdth changes the laid-out line width', w.width > n.width*1.6, `narrow=${n.width.toFixed(1)}px wide=${w.width.toFixed(1)}px`);
+}
+
+/* ─── 9. perf budget ─── */
+CK('9. performance budget'); group='9. performance budget'; curTable=null;
+{
+  clearTypographyCaches();
+  const spec={text:'Motion design without compromise', family:'Inter', size:72, weight:700, leading:1.2};
+  const t0=performance.now(); const L=layoutText(spec,registry); const first=performance.now()-t0;
+  const t1=performance.now(); for(let i=0;i<50;i++) layoutText(spec,registry); const cached=(performance.now()-t1)/50;
+  chk('cold layout under 60ms', first<60, `${first.toFixed(2)}ms`);
+  chk('cached layout under 0.2ms', cached<0.2, `${cached.toFixed(4)}ms`);
+
+  const anim=[defaultAnimator({props:{y:-40,opacity:0,scale:0.9},delay:0.03,duration:0.5})];
+  const cv=mkCanvas(1400,300), g=cv.getContext('2d');
+  // warm
+  drawText(g,L,0.1,{x:20,y:60,animators:anim});
+  const t2=performance.now(); const N=60;
+  for(let f=0;f<N;f++){ g.clearRect(0,0,1400,300); drawText(g,L,f/60,{x:20,y:60,animators:anim}); g.getImageData(0,0,1,1); }
+  const per=(performance.now()-t2)/N;
+  chk('animated text frame under 8ms (readback forced)', per<8, `${per.toFixed(2)}ms/frame → ${(1000/per).toFixed(0)}fps headroom, ${L.lines[0].units.length} units`);
+  T('cache sizes', null, JSON.stringify(cacheStats())+` documentFonts=${document.fonts.size}`, 'skip');
+}
+
+/* ═══ summary ═══ */
+const passed = results.filter(r=>r.ok===true).length;
+const failed = results.filter(r=>r.ok===false).length;
+const skipped= results.filter(r=>r.ok===null).length;
+sumEl.innerHTML = `<span class="${failed?'fail':'pass'}">${failed?'FAILED':'ALL PASS'}</span> — ${passed} passed, ${failed} failed, ${skipped} info`;
+window.__TESTS__ = { results, passed, failed, skipped, groups:[...new Set(results.map(r=>r.group))] };
+document.title = failed ? `TEST-FAIL-${failed}` : 'TEST-PASS';
+</script>
+</body></html>

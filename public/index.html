@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FrameZero — real-time motion engine</title>
+<meta name="description" content="GPU-native, real-time motion design and compositing. Preview is the render. No cache, no green bars.">
+<link rel="stylesheet" href="css/app.css">
+<link rel="icon" type="image/png" href="brand/favicon.png">
+<link rel="apple-touch-icon" href="brand/logo-180.png">
+</head>
+<body>
+
+<!-- ══════════════════ TOP BAR ══════════════════ -->
+<header id="topbar">
+  <div class="tb-left">
+    <div class="logo" title="FrameZero">
+      <img class="logo-img" src="brand/logo.png" alt="" width="22" height="22">
+      <span class="logo-txt">Frame<b>Zero</b></span>
+    </div>
+    <div class="proj">
+      <input id="project-name" value="kinetic-type-demo.fz" spellcheck="false" aria-label="Project name">
+      <span class="proj-dirty" id="proj-dirty" title="Unsaved changes">●</span>
+    </div>
+  </div>
+
+  <div class="tb-center">
+    <div class="seg" id="quality-seg" role="group" aria-label="Render quality">
+      <button data-q="draft" class="on" title="Draft — fp16-precision proxy resolution, sub-frame interaction (⌘1)">Draft</button>
+      <button data-q="exact" title="Exact — full resolution, deterministic output (⌘2)">Exact</button>
+    </div>
+    <div class="transport">
+      <button id="btn-start" title="Go to start (Home)"></button>
+      <button id="btn-prev" title="Previous keyframe"></button>
+      <button id="btn-play" class="play" title="Play / Pause (Space)"></button>
+      <button id="btn-next" title="Next keyframe"></button>
+      <button id="btn-end" title="Go to end (End)"></button>
+      <button id="btn-loop" class="on" title="Loop (L)"></button>
+    </div>
+  </div>
+
+  <div class="tb-right">
+    <div class="backend-badge" id="backend-badge" title="Active render backend">
+      <span class="dot"></span><span id="backend-name">detecting…</span>
+    </div>
+    <button class="ghost" id="btn-hud" title="Toggle performance HUD (H)">HUD</button>
+    <button class="ghost" id="btn-bench" title="Run the reproducible benchmark suite">Benchmark</button>
+    <button class="ghost" id="btn-clearance" title="Font Clearance Report">Clearance</button>
+    <button class="ghost" id="btn-palette" title="Command palette (⌘K)">⌘K</button>
+    <div class="seg" id="io-seg">
+      <button data-io="open" title="Open project JSON">Open</button>
+      <button data-io="save" title="Save project JSON (⌘S)">Save</button>
+      <button data-io="export" class="primary" title="Export video / frame (⌘E)">Export</button>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════════ MAIN ══════════════════ -->
+<main id="main">
+
+  <!-- LEFT -->
+  <aside id="left">
+    <nav class="tabs" id="left-tabs">
+      <button data-tab="layers" class="on">Layers</button>
+      <button data-tab="assets">Assets</button>
+      <button data-tab="effects">Effects</button>
+      <button data-tab="fonts">Fonts</button>
+    </nav>
+
+    <section class="tabpane on" data-pane="layers">
+      <div class="pane-head">
+        <span>Scene graph</span>
+        <div class="pane-actions">
+          <button class="ic" id="btn-add-text" title="Add text layer (T)"></button>
+          <button class="ic" id="btn-add-shape" title="Add shape layer (S)"></button>
+          <button class="ic" id="btn-add-solid" title="Add solid (D)"></button>
+          <button class="ic" id="btn-del" title="Delete selected (Del)"></button>
+        </div>
+      </div>
+      <div id="layer-list" class="layer-list"></div>
+      <div class="pane-foot" id="scene-stats">—</div>
+    </section>
+
+    <section class="tabpane" data-pane="assets">
+      <div class="pane-head"><span>Assets</span>
+        <div class="pane-actions"><button class="ic" id="btn-import-media" title="Import media"></button></div>
+      </div>
+      <div id="asset-list" class="asset-list"></div>
+      <div class="pane-foot">Drop image / video / audio anywhere on the app to import.</div>
+      <input type="file" id="file-input" accept="image/*,video/*,audio/*,.json,.fz" multiple hidden>
+    </section>
+
+    <section class="tabpane" data-pane="effects">
+      <div class="pane-head"><span>Effects</span>
+        <div class="pane-actions"><input id="fx-search" placeholder="Filter…" spellcheck="false"></div>
+      </div>
+      <div id="fx-list" class="fx-list"></div>
+    </section>
+
+    <section class="tabpane" data-pane="fonts">
+      <div class="pane-head"><span>Font library</span>
+        <div class="pane-actions"><button class="ic" id="btn-font-audit" title="Re-audit font coverage"></button></div>
+      </div>
+      <div id="font-list" class="font-list"></div>
+      <div class="pane-foot" id="font-foot">All bundled faces are SIL OFL 1.1 — cleared for video, broadcast and embedding.</div>
+    </section>
+  </aside>
+
+  <!-- CENTER -->
+  <section id="center">
+    <div id="viewport-wrap">
+      <canvas id="viewport" tabindex="0"></canvas>
+      <div id="vp-overlay">
+        <div id="vp-guides"></div>
+        <div id="vp-handles"></div>
+      </div>
+      <div id="hud" class="hud">
+        <div class="hud-row"><span class="k">backend</span><span class="v" id="hud-backend">—</span></div>
+        <div class="hud-row"><span class="k">fps</span><span class="v num" id="hud-fps">—</span></div>
+        <div class="hud-row"><span class="k">frame</span><span class="v num" id="hud-frametime">—</span></div>
+        <div class="hud-row"><span class="k">in→pixel</span><span class="v num" id="hud-latency">—</span></div>
+        <div class="hud-row"><span class="k">nodes eval</span><span class="v num" id="hud-eval">—</span></div>
+        <div class="hud-row"><span class="k">cache</span><span class="v" id="hud-cache">none</span></div>
+        <div class="hud-row"><span class="k">surfaces</span><span class="v num" id="hud-surfaces">—</span></div>
+        <div class="hud-row"><span class="k">est. mem</span><span class="v num" id="hud-mem">—</span></div>
+        <div class="hud-row"><span class="k">mode</span><span class="v" id="hud-mode">draft</span></div>
+        <canvas id="hud-spark" width="220" height="46"></canvas>
+        <div class="hud-legend"><span>frame time · last 110 frames · red = 16.7ms budget</span></div>
+      </div>
+      <div id="vp-badge"></div>
+      <div id="vp-empty" class="vp-empty hidden">
+        <p>No layers. Press <kbd>T</kbd> for text, <kbd>S</kbd> for shape.</p>
+      </div>
+    </div>
+
+    <!-- NODE / CURVES lens -->
+    <div id="lens-wrap" class="hidden">
+      <div class="lens-head">
+        <div class="seg" id="lens-seg">
+          <button data-lens="nodes" class="on">Node graph</button>
+          <button data-lens="curves">Value curves</button>
+        </div>
+        <span class="lens-hint">Same scene graph, different lens — not a separate document.</span>
+      </div>
+      <canvas id="nodeview"></canvas>
+    </div>
+  </section>
+
+  <!-- RIGHT -->
+  <aside id="right">
+    <nav class="tabs" id="right-tabs">
+      <button data-tab="inspect" class="on">Inspect</button>
+      <button data-tab="type">Type</button>
+      <button data-tab="axes">Axes</button>
+      <button data-tab="fx">Effects</button>
+    </nav>
+    <section class="tabpane on" data-pane="inspect"><div id="inspector" class="inspector"></div></section>
+    <section class="tabpane" data-pane="type"><div id="type-panel" class="inspector"></div></section>
+    <section class="tabpane" data-pane="axes"><div id="axes-panel" class="inspector"></div></section>
+    <section class="tabpane" data-pane="fx"><div id="fx-panel" class="inspector"></div></section>
+  </aside>
+</main>
+
+<!-- ══════════════════ TIMELINE ══════════════════ -->
+<footer id="timeline">
+  <div class="tl-head">
+    <div class="tl-time">
+      <span id="tl-tc" class="tc">00:00:00:00</span>
+      <span id="tl-fps" class="sub">30 fps</span>
+      <span id="tl-dur" class="sub">4.00 s</span>
+    </div>
+    <div class="seg" id="tl-view-seg">
+      <button data-tlv="layers" class="on">Layers</button>
+      <button data-tlv="nodes">Nodes</button>
+      <button data-tlv="curves">Curves</button>
+    </div>
+    <div class="tl-zoom">
+      <button id="tl-zoom-out" class="ic">−</button>
+      <input type="range" id="tl-zoom" min="20" max="600" value="120" aria-label="Timeline zoom">
+      <button id="tl-zoom-in" class="ic">＋</button>
+      <button id="tl-snap" class="ic on" title="Snap to frames">⌖</button>
+      <button id="tl-autokey" class="ic" title="Auto-key: record a keyframe whenever a property changes (K)"></button>
+    </div>
+    <div class="tl-comp">
+      <label>comp</label>
+      <select id="comp-size">
+        <option value="1920x1080">1920×1080 · 16:9</option>
+        <option value="1080x1920">1080×1920 · 9:16</option>
+        <option value="1080x1080">1080×1080 · 1:1</option>
+        <option value="3840x2160">3840×2160 · 4K</option>
+        <option value="1280x720">1280×720 · 720p</option>
+      </select>
+      <label>dur</label><input id="comp-dur" type="number" min="0.5" max="120" step="0.5" value="4">
+      <label>fps</label><input id="comp-fps" type="number" min="12" max="120" step="1" value="30">
+    </div>
+  </div>
+  <div class="tl-body">
+    <div class="tl-labels" id="tl-labels"></div>
+    <div class="tl-scroll" id="tl-scroll">
+      <canvas id="tl-ruler"></canvas>
+      <canvas id="tl-tracks"></canvas>
+      <div id="tl-playhead"></div>
+    </div>
+  </div>
+</footer>
+
+<!-- ══════════════════ OVERLAYS ══════════════════ -->
+<div id="palette" class="modal hidden" role="dialog" aria-label="Command palette">
+  <div class="pal-box">
+    <input id="pal-input" placeholder="Type a command, layer, effect or font…" spellcheck="false" autocomplete="off">
+    <div id="pal-results"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ run</span><span>esc close</span></div>
+  </div>
+</div>
+
+<div id="modal-root" class="modal hidden"><div class="modal-box" id="modal-box"></div></div>
+<div id="toasts"></div>
+<div id="drop-hint" class="hidden">Drop to import</div>
+<div id="boot">
+  <div class="boot-inner">
+    <img class="boot-img" src="brand/logo.png" alt="" width="72" height="72">
+    <div class="boot-logo">Frame<b>Zero</b></div>
+    <div class="boot-bar"><i></i></div>
+    <div class="boot-log" id="boot-log">initialising…</div>
+  </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

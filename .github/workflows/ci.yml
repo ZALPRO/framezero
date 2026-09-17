@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Chromium for the browser suites
+        run: npx playwright install --with-deps chromium
+      - name: Static server
+        run: |
+          nohup node server.mjs > server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:4173/index.html > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:4173/index.html > /dev/null
+      - name: Syntax + CSS audit
+        run: |
+          bash tools/syntax.sh
+          node tools/cssaudit.mjs
+      - name: Model suites
+        run: |
+          node tools/test.mjs typography
+          node tools/test.mjs render
+          node tools/test.mjs document
+      - name: Product smoke (real browser)
+        run: node tools/smoke.mjs
+      - name: Artefacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/

@@ -1,0 +1,113 @@
+<!doctype html><html><head><meta charset="utf-8"><title>p4</title></head><body>
+<canvas id="c" width="900" height="900"></canvas><pre id="out"></pre>
+<script type="module">
+const out=document.getElementById('out');const log=(...a)=>{out.textContent+=a.join(' ')+'\n';};
+const R={};const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+async function mk(f,u,d){const b=await (await fetch(u)).arrayBuffer();const x=new FontFace(f,b,d);await x.load();document.fonts.add(x);}
+await mk('VZ','/fonts/Vazirmatn-var.woff2',{weight:'100 900'});
+await mk('IT','/fonts/Inter-var.ttf',{weight:'100 900'});
+await mk('RF','/fonts/RobotoFlex-var.ttf',{weight:'100 1000'});
+await document.fonts.ready;
+const seg=s=>[...new Intl.Segmenter('und',{granularity:'grapheme'}).segment(s)].map(x=>x.segment);
+
+const W=800,H=150,PX=40,PY=25;
+function buf(text,fam,size,dir,weight=400,tracking=0){
+  const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');
+  g.font=`${weight} ${size}px ${fam}`;g.direction=dir;g.textAlign='left';g.textBaseline='top';
+  g.letterSpacing=tracking+'px';g.fillStyle='#fff';g.fillText(text,PX,PY);return c;
+}
+function cols(c){const g=c.getContext('2d'),d=g.getImageData(0,0,W,H).data,a=new Array(W).fill(0);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(d[(y*W+x)*4+3]>30)a[x]++;return a;}
+function runs(a,gap=0){const r=[];let s=null,z=0;
+  for(let x=0;x<a.length;x++){if(a[x]>0){if(s===null)s=x;z=0;}else if(s!==null){z++;if(z>gap){r.push([s,x-z]);s=null;z=0;}}}
+  if(s!==null)r.push([s,a.length-1]);return r;}
+function boxOf(a){let x0=1e9,x1=-1e9,n=0;for(let x=0;x<a.length;x++)if(a[x]>0){n+=a[x];if(x<x0)x0=x;if(x>x1)x1=x;}return {x0,x1,ink:n};}
+
+/* ── 1. LTR: prefix boxes vs real ink ── */
+const EN='Frame Zero';
+R.ltr={};
+{
+  const c=buf(EN,'IT',64,'ltr');const a=cols(c);const rr=runs(a);
+  ctx.font='400 64px IT';ctx.direction='ltr';ctx.letterSpacing='0px';
+  const cl=seg(EN);const pre=[0];for(let i=0;i<cl.length;i++)pre.push(ctx.measureText(cl.slice(0,i+1).join('')).width);
+  const pred=cl.map((ch,i)=>[Math.round(PX+pre[i]),Math.round(PX+pre[i+1])]);
+  R.ltr.inkRuns=rr;R.ltr.prefixBoxes=pred;R.ltr.clusters=cl.length;R.ltr.runs=rr.length;
+  // accuracy: for each non-space cluster, does ink exist in its box, and how well aligned?
+  const ns=pred.filter((_,i)=>cl[i].trim());
+  R.ltr.allHaveInk=ns.every(([s,e])=>{let n=0;for(let x=s;x<e;x++)n+=a[x];return n>0;});
+  R.ltr.meanEdgeErr=+(ns.map(([s,e],k)=>{const r=rr[k];return r?((Math.abs(r[0]-s)+Math.abs(r[1]-e))/2):99;}).reduce((x,y)=>x+y,0)/Math.max(1,ns.length)).toFixed(2);
+}
+log('1 LTR prefix vs ink:',JSON.stringify(R.ltr));
+
+/* ── 2. one-pass individual measurement (O(n)) accuracy for LTR ── */
+R.onepass={};
+{
+  ctx.font='400 64px IT';ctx.direction='ltr';ctx.letterSpacing='0px';
+  const cl=seg(EN);let x=0;const acc=cl.map(ch=>{const w=ctx.measureText(ch).width;const b=[x,x+w];x+=w;return b;});
+  const c=buf(EN,'IT',64,'ltr');const a=cols(c);const rr=runs(a);
+  R.onepass.boxes=acc.map(([s,e])=>[Math.round(PX+s),Math.round(PX+e)]);
+  R.onepass.inkRuns=rr;
+  R.onepass.totalDrift=+(Math.abs(x-ctx.measureText(EN).width)).toFixed(2);
+  R.onepass.meanErr=+(acc.map(([s,e],k)=>{const r=rr[k];return r?((Math.abs(PX+s-r[0])+Math.abs(PX+e-r[1]))/2):99;}).reduce((p,q)=>p+q,0)/cl.length).toFixed(2);
+}
+log('2 LTR one-pass O(n):',JSON.stringify(R.onepass));
+
+/* ── 3. ink-run segmentation as animation units ── */
+R.units={};
+const samples=[
+  {k:'latin_word',t:'Frame Zero',f:'IT',d:'ltr'},
+  {k:'latin_sentence',t:'The quick brown fox jumps',f:'IT',d:'ltr'},
+  {k:'persian',t:'سلام دنیا',f:'VZ',d:'rtl'},
+  {k:'persian_long',t:'طراحی حرکتی حرفه‌ای بدون محدودیت',f:'VZ',d:'rtl'},
+  {k:'mixed',t:'FrameZero سلام ۱۲۳',f:'VZ',d:'rtl'},
+  {k:'digits',t:'0123456789',f:'IT',d:'ltr'},
+];
+for(const s of samples){
+  const c=buf(s.t,s.f,48,s.d);const a=cols(c);const r0=runs(a,0),r2=runs(a,2),r4=runs(a,4);
+  R.units[s.k]={chars:seg(s.t).length,words:s.t.trim().split(/\s+/).length,runs_gap0:r0.length,runs_gap2:r2.length,runs_gap4:r4.length,ink:boxOf(a).ink};
+}
+log('3 ink-run units by gap threshold:',JSON.stringify(R.units,null,1));
+
+/* ── 4. cost: O(n) layout at scale ── */
+R.cost={};
+for(const n of [50,200,600,2000]){
+  const t='abcdefghij'.repeat(Math.ceil(n/10)).slice(0,n);
+  let x=performance.now();ctx.font='400 32px IT';let acc=0;for(const ch of seg(t))acc+=ctx.measureText(ch).width;
+  R.cost['onepass_'+n]=+(performance.now()-x).toFixed(2);
+  x=performance.now();ctx.measureText(t);R.cost['whole_'+n]=+(performance.now()-x).toFixed(2);
+  x=performance.now();const c=buf(t,'IT',32,'ltr');cols(c);R.cost['bufferScan_'+n]=+(performance.now()-x).toFixed(2);
+}
+log('4 cost ms:',JSON.stringify(R.cost,null,1));
+
+/* ── 5. per-unit blit with transforms, at 60fps budget ── */
+R.blit={};
+function blitUnits(text,fam,size,dir,units,time){
+  const src=buf(text,fam,size,dir);const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');
+  units.forEach((u,i)=>{
+    const p=Math.max(0,Math.min(1,(time-i*0.06)/0.5));
+    const e=1-Math.pow(1-p,3);
+    const cx=(u[0]+u[1])/2,cy=H/2;
+    g.save();g.globalAlpha=e;g.translate(cx,cy+(1-e)*40);g.scale(0.6+0.4*e,0.6+0.4*e);g.rotate((1-e)*-0.2);g.translate(-cx,-cy);
+    g.drawImage(src,u[0],0,u[1]-u[0],H,u[0],0,u[1]-u[0],H);g.restore();
+  });
+  return c;
+}
+for(const s of [{k:'latin',t:'Frame Zero animates beautifully',f:'IT',d:'ltr'},{k:'persian',t:'طراحی حرکتی حرفه‌ای',f:'VZ',d:'rtl'}]){
+  const c0=buf(s.t,s.f,48,s.d);const u=runs(cols(c0),2);
+  const x=performance.now();for(let f=0;f<30;f++)blitUnits(s.t,s.f? s.f:'IT',48,s.d,u,f/30*2);
+  R.blit[s.k]={units:u.length,frames:30,totalMs:+(performance.now()-x).toFixed(1),perFrame:+((performance.now()-x)/30).toFixed(2)};
+}
+log('5 blit animation cost:',JSON.stringify(R.blit,null,1));
+
+/* ── 6. visual composite for the screenshot ── */
+ctx.fillStyle='#0d0f14';ctx.fillRect(0,0,900,900);
+let y=10;
+function stamp(label,c){ctx.fillStyle='#00e5a0';ctx.font='11px IT';ctx.fillText(label,10,y+10);ctx.drawImage(c,10,y+16);y+=H+24;}
+stamp('LTR "Frame Zero" — ink runs = animation units',buf('Frame Zero','IT',64,'ltr'));
+{const c=buf('Frame Zero','IT',64,'ltr');const a=cols(c);const rr=runs(a,2);const g=c.getContext('2d');
+ g.fillStyle='rgba(0,229,160,.25)';for(const[s,e]of rr)g.fillRect(s,0,e-s,H);stamp('LTR runs overlay (gap=2)',c);}
+{const c=buf('سلام دنیا','VZ',64,'rtl');const a=cols(c);const rr=runs(a,2);const g=c.getContext('2d');
+ g.fillStyle='rgba(255,94,168,.28)';for(const[s,e]of rr)g.fillRect(s,0,e-s,H);stamp('Persian ink runs (cursive groups — joining preserved)',c);}
+{const c0=buf('سلام دنیا','VZ',64,'rtl');const u=runs(cols(c0),2);stamp('Persian per-unit animated blit @t=0.55',blitUnits('سلام دنیا','VZ',64,'rtl',u,0.55));}
+window.__P4__=R;document.title='P4-DONE';
+</script></body></html>

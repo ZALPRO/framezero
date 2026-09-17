@@ -1,0 +1,77 @@
+<!doctype html><html><head><meta charset="utf-8"><title>perf</title></head><body>
+<pre id="o"></pre><script type="module">
+const o=document.getElementById('o');const log=(...a)=>{o.textContent+=a.join(' ')+'\n';};
+const R={};
+import { Renderer } from '/js/render/compositor.js';
+import { FontRegistry } from '/js/core/fonts.js';
+const registry=new FontRegistry(); await registry.loadStock(); await registry.loadMeta();
+
+const W=640,H=360;
+const mk=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c;};
+
+/* The same scene the suite's perf test uses: 8 blurred shape layers (a third of
+   them screen-blended, so the non-native blend path is exercised) + 1 animated
+   text layer. */
+const layers=[];
+for(let i=0;i<8;i++)layers.push({id:'s'+i,type:'shape',visible:true,opacity:0.8,blend:i%3===0?'screen':'normal',width:160,height:160,
+  resolved:{position:[40+i*70,60+(i%3)*80],scale:[1,1],rotation:i*12,shape:{type:i%2?'ellipse':'rect',rx:14},style:{fill:i%2?'#00e5a0':'#ff5ea8',fillOpacity:1}},
+  effects:[{id:'gaussianBlur',enabled:true,params:{radius:3+i,quality:9}}]});
+layers.push({id:'t',type:'text',visible:true,opacity:1,blend:'normal',
+  resolved:{position:[40,20],scale:[1,1],rotation:0,text:{text:'Eight layers, blurred',family:'Inter',size:44,weight:700,leading:1.2,color:'#fff'},
+    animators:[{id:'a',enabled:true,unit:'glyph',order:'auto',range:{start:0,end:100,offset:0,softness:0},delay:0.03,duration:0.5,ease:'ease-out-cubic',props:{y:-30,opacity:0}}]}});
+const scene={width:W,height:H,background:'#0d0f14',layers};
+
+const rs={};
+for(const kind of ['webgl2','canvas2d']){
+  const c=mk(W,H); const r=new Renderer();
+  const init=await r.attach(c,{preferred:kind,width:W,height:H,dpr:1});
+  if(init.chosen!==kind){log(kind+' UNAVAILABLE');continue;}
+  rs[kind]=r;
+  for(let f=0;f<10;f++)r.renderFrame(scene,f/30,registry);   // compile shaders, warm JIT+caches
+}
+
+const q=(a,p)=>{const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor(p*s.length))];};
+const WARM=10, N=40, REPS=6;
+
+/* Interleave the two backends every repetition. Measuring one backend 30 times
+   in a row and only once (as the suite does) lets JIT warm-up and clock drift
+   flatter whichever runs second — that is how a 0.48× reading became 1.20×. */
+log(`— ${REPS} interleaved reps × ${N} frames (after ${WARM} warm-up) —`);
+R.samples={webgl2:[],canvas2d:[]};
+for(let rep=0;rep<REPS;rep++){
+  const order = rep%2===0 ? ['webgl2','canvas2d'] : ['canvas2d','webgl2'];
+  const line=[];
+  for(const kind of order){
+    const r=rs[kind]; if(!r)continue;
+    const t=[];
+    for(let f=0;f<WARM+N;f++){
+      const t0=performance.now();
+      r.renderFrame(scene,f/30,registry);
+      const dt=performance.now()-t0;
+      if(f>=WARM)t.push(dt);
+    }
+    R.samples[kind].push(...t);
+    line.push(`${kind}: med=${q(t,0.5).toFixed(2)} min=${q(t,0).toFixed(2)} p95=${q(t,0.95).toFixed(2)}`);
+  }
+  log(`  rep${rep}  `+line.join('   |   '));
+}
+
+log('\n— aggregate over all reps —');
+R.agg={};
+for(const kind of Object.keys(rs)){
+  const t=R.samples[kind];
+  R.agg[kind]={n:t.length,median:+q(t,0.5).toFixed(3),mean:+(t.reduce((a,b)=>a+b,0)/t.length).toFixed(3),
+               min:+q(t,0).toFixed(3),p95:+q(t,0.95).toFixed(3),fps:+(1000/q(t,0.5)).toFixed(1)};
+  const st=rs[kind].frameStats;
+  log(`  ${kind.padEnd(9)} n=${R.agg[kind].n}  median=${R.agg[kind].median}ms (${R.agg[kind].fps}fps)  mean=${R.agg[kind].mean}  min=${R.agg[kind].min}  p95=${R.agg[kind].p95}`);
+  log(`            last-frame breakdown: raster=${st.rasterMs.toFixed(2)} effects=${st.effectMs.toFixed(2)} composite=${st.compositeMs.toFixed(2)} passes=${st.passes}`);
+}
+if(R.agg.webgl2&&R.agg.canvas2d){
+  R.ratioMedian=+(R.agg.webgl2.median/R.agg.canvas2d.median).toFixed(3);
+  R.ratioMean=+(R.agg.webgl2.mean/R.agg.canvas2d.mean).toFixed(3);
+  log(`\n  webgl2 ÷ canvas2d : median ${R.ratioMedian}×   mean ${R.ratioMean}×   (<1 ⇒ WebGL2 faster)`);
+}
+R.shaderErrors=Object.fromEntries(Object.entries(rs).map(([k,r])=>[k,r.stats().shaderErrors||[]]));
+log('  shader errors:',JSON.stringify(R.shaderErrors));
+window.__PERF__=R;document.title='PERF-DONE';
+</script></body></html>

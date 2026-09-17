@@ -1,0 +1,155 @@
+<!doctype html><html><head><meta charset="utf-8"><title>p2</title></head><body>
+<canvas id="c" width="900" height="600"></canvas><pre id="out"></pre>
+<script type="module">
+const out=document.getElementById('out'); const log=(...a)=>{const s=a.join(' ');out.textContent+=s+'\n';};
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const R={};
+
+async function buf(u){return (await fetch(u)).arrayBuffer();}
+const rfBuf=await buf('/fonts/RobotoFlex-var.ttf');
+const vzBuf=await buf('/fonts/Vazirmatn-var.woff2');
+const itBuf=await buf('/fonts/Inter-var.ttf');
+
+async function mkFace(fam,b,desc){const t=performance.now();const f=new FontFace(fam,b,desc);await f.load();document.fonts.add(f);return +(performance.now()-t).toFixed(1);}
+
+// ── A: variationSettings pixel proof on custom axes (GRAD/XOPQ) + slnt ──
+async function inkPx(fam,text,size,fill='#000'){
+  ctx.save();ctx.clearRect(0,0,900,600);ctx.fillStyle=fill;
+  ctx.font=`400 ${size}px ${fam}`;ctx.textBaseline='alphabetic';ctx.fillText(text,20,size+10);
+  const d=ctx.getImageData(0,0,900,size*2+40).data;let n=0,bb=[1e9,-1e9,1e9,-1e9];
+  const H=size*2+40;
+  for(let y=0;y<H;y++)for(let x=0;x<900;x++){const i=(y*900+x)*4;if(d[i+3]>40){n++;if(x<bb[0])bb[0]=x;if(x>bb[1])bb[1]=x;if(y<bb[2])bb[2]=y;if(y>bb[3])bb[3]=y;}}
+  ctx.restore();return {ink:n,w:bb[1]-bb[0],h:bb[3]-bb[2]};
+}
+R.A={};
+const base=await mkFace('A0',rfBuf,{weight:'100 1000',stretch:'25% 151%'});
+R.A.loadMs=base;
+R.A.grad0=await inkPx('A0','Handgloves',72);
+const g150=await mkFace('A1',rfBuf,{weight:'100 1000',variationSettings:"'GRAD' 150"});
+R.A.grad150=await inkPx('A1','Handgloves',72);
+const xopq=await mkFace('A2',rfBuf,{weight:'100 1000',variationSettings:"'XOPQ' 175"});
+R.A.xopq175=await inkPx('A2','Handgloves',72);
+const slnt=await mkFace('A3',rfBuf,{weight:'100 1000',variationSettings:"'slnt' -10"});
+R.A.slntM10=await inkPx('A3','Handgloves',72);
+const wdth=await mkFace('A4',rfBuf,{weight:'100 1000',variationSettings:"'wdth' 25"});
+R.A.wdth25=await inkPx('A4','Handgloves',72);
+const wdth151=await mkFace('A5',rfBuf,{weight:'100 1000',variationSettings:"'wdth' 151"});
+R.A.wdth151=await inkPx('A5','Handgloves',72);
+R.A.verdict={
+  GRAD_changes_ink: R.A.grad150.ink!==R.A.grad0.ink,
+  XOPQ_changes_ink: R.A.xopq175.ink!==R.A.grad0.ink,
+  slnt_changes_width: R.A.slntM10.w!==R.A.grad0.w,
+  wdth_changes_width: Math.abs(R.A.wdth151.w-R.A.wdth25.w)>50,
+};
+log('A variationSettings pixel proof:',JSON.stringify(R.A,null,1));
+
+// ── B: can ctx.font override axes of a variationSettings face? (weight numeric) ──
+R.B={};
+R.B.A1_w100=+( () => { ctx.font='100 72px A1'; return ctx.measureText('Handgloves').width; } )().toFixed(2);
+R.B.A1_w900=+( () => { ctx.font='900 72px A1'; return ctx.measureText('Handgloves').width; } )().toFixed(2);
+R.B.differs=R.B.A1_w900>R.B.A1_w100+5;
+log('B numeric weight over a variationSettings face:',JSON.stringify(R.B));
+
+// ── C: cost of creating a new variationSettings face (slider responsiveness) ──
+R.C=[];
+for(let i=0;i<6;i++){R.C.push(await mkFace('C'+i,rfBuf,{weight:'100 1000',variationSettings:`'GRAD' ${i*30-100}`}));}
+R.C_stats={min:Math.min(...R.C),max:Math.max(...R.C),avg:+(R.C.reduce((a,b)=>a+b,0)/R.C.length).toFixed(1)};
+R.C.fontFaceCount=document.fonts.size;
+log('C variationSettings face creation ms:',JSON.stringify(R.C),JSON.stringify(R.C_stats));
+
+// ── C2: cheaper alternative — reuse one face, change via ctx.font weight/stretch only ──
+R.C2=[];const t0=performance.now();
+for(let w=100;w<=900;w+=160){ctx.font=`${w} 72px A0`;ctx.measureText('Handgloves').width;}
+R.C2.measureLoopMs=+(performance.now()-t0).toFixed(2);
+log('C2 ctx.font weight switching cost:',JSON.stringify(R.C2));
+
+// ── D: featureSettings (OpenType features) on FontFace ──
+R.D={};
+const noLiga=await mkFace('D0',itBuf,{weight:'100 900',featureSettings:'"liga" 0, "calt" 0'});
+const withLiga=await mkFace('D1',itBuf,{weight:'100 900',featureSettings:'"liga" 1, "calt" 1'});
+R.D.noLiga_w=+(()=>{ctx.font='400 48px D0';return ctx.measureText('fiflfith').width;})().toFixed(2);
+R.D.withLiga_w=+(()=>{ctx.font='400 48px D1';return ctx.measureText('fiflfith').width;})().toFixed(2);
+R.D.differs=Math.abs(R.D.noLiga_w-R.D.withLiga_w)>0.01;
+log('D featureSettings liga:',JSON.stringify(R.D));
+
+// ── E: per-cluster layout (the real typographic animator) ──
+R.E={};
+const FA='سلام دنیا';  // سلام دنیا
+const seg=(s)=>[...new Intl.Segmenter('fa',{granularity:'grapheme'}).segment(s)].map(x=>x.segment);
+R.E.clusters=seg(FA);
+function layoutClusters(text,dir,fam,size){
+  ctx.font=`400 ${size}px ${fam}`;ctx.direction=dir;ctx.letterSpacing='0px';
+  const cl=seg(text);let x=0;const boxes=[];
+  const full=ctx.measureText(text).width;
+  for(let i=0;i<cl.length;i++){
+    const a=ctx.measureText(cl.slice(0,i+1).join('')).width;
+    const b=ctx.measureText(cl.slice(0,i).join('')).width;
+    const adv=a-b;
+    boxes.push({i,ch:cl[i],adv:+adv.toFixed(2),offset:+(dir==='rtl'?full-a:b).toFixed(2)});
+  }
+  return {full:+full.toFixed(2),boxes,sum:+boxes.reduce((s,b)=>s+b.adv,0).toFixed(2)};
+}
+R.E.rtl=layoutClusters(FA,'rtl','A0',48);
+R.E.ltr=layoutClusters('FrameZero ۱۲۳','ltr','A0',48);
+R.E.rtl_additive=Math.abs(R.E.rtl.full-R.E.rtl.sum)<1.5;
+R.E.ltr_additive=Math.abs(R.E.ltr.full-R.E.ltr.sum)<1.5;
+log('E per-cluster RTL layout:',JSON.stringify(R.E.rtl,null,1));
+log('E additive check rtl:',R.E.rtl_additive,'ltr:',R.E.ltr_additive);
+// E2: is prefix-measurement correct for RTL joined script? draw cluster-by-cluster and compare ink to whole-string draw
+R.E2={};
+const vzFam=await mkFace('EVZ',vzBuf,{weight:'100 900'});
+function inkString(text,fam,size){
+  ctx.save();ctx.clearRect(0,0,900,300);ctx.fillStyle='#000';ctx.font=`400 ${size}px ${fam}`;
+  ctx.direction='rtl';ctx.textAlign='right';ctx.textBaseline='alphabetic';ctx.fillText(text,880,size+30);
+  const d=ctx.getImageData(0,0,900,size+90).data;let n=0;for(let i=3;i<d.length;i+=4)if(d[i]>40)n++;ctx.restore();return n;
+}
+R.E2.whole=inkString(FA,'EVZ',48);
+// per-cluster draw (each cluster drawn separately) — should look BROKEN if joining is lost
+function inkPerCluster(text,fam,size){
+  ctx.save();ctx.clearRect(0,0,900,300);ctx.fillStyle='#000';ctx.font=`400 ${size}px ${fam}`;
+  ctx.direction='rtl';ctx.textAlign='right';ctx.textBaseline='alphabetic';
+  const cl=seg(text);let x=880;
+  for(const c of cl){const w=ctx.measureText(c).width;ctx.fillText(c,x,size+30);x-=w;}
+  const d=ctx.getImageData(0,0,900,size+90).data;let n=0;for(let i=3;i<d.length;i+=4)if(d[i]>40)n++;ctx.restore();return n;
+}
+R.E2.perCluster=inkPerCluster(FA,'EVZ',48);
+R.E2.joinLost=R.E2.perCluster>R.E2.whole*1.15;
+log('E2 whole-string ink:',R.E2.whole,'per-cluster ink:',R.E2.perCluster,'=> joining lost when drawn separately:',R.E2.joinLost);
+
+// ── F: WebGL2 availability + key extensions ──
+R.F={};
+const gl=cv.getContext('webgl2',{antialias:false});
+// note: 2d ctx already taken; use a fresh canvas
+const cv2=document.createElement('canvas');const g2=cv2.getContext('webgl2');
+R.F.webgl2=!!g2;
+if(g2){
+  R.F.renderer=g2.getParameter(g2.RENDERER);R.F.vendor=g2.getParameter(g2.VENDOR);
+  R.F.version=g2.getParameter(g2.VERSION);R.F.glsl=g2.getParameter(g2.SHADING_LANGUAGE_VERSION);
+  R.F.maxTex=g2.getParameter(g2.MAX_TEXTURE_SIZE);
+  R.F.exts=['EXT_color_buffer_float','OES_texture_float_linear','WEBGL_color_buffer_float','EXT_float_blend','KHR_parallel_shader_compile'].map(e=>e+':'+(!!g2.getExtension(e)));
+  const dbg=g2.getExtension('WEBGL_debug_renderer_info');
+  if(dbg){R.F.unmaskedRenderer=g2.getParameter(dbg.UNMASKED_RENDERER_WEBGL);R.F.unmaskedVendor=g2.getParameter(dbg.UNMASKED_VENDOR_WEBGL);}
+}
+log('F WebGL2:',JSON.stringify(R.F,null,1));
+
+// ── G: ctx.filter blur cost (fallback effect path) ──
+R.G={};
+for(const f of ['none','blur(4px)','blur(16px)','brightness(1.4) contrast(1.2) saturate(1.5)']){
+  ctx.save();ctx.clearRect(0,0,900,600);ctx.filter=f;ctx.fillStyle='#0af';
+  const t=performance.now();for(let i=0;i<20;i++)ctx.fillRect(50+i*5,50+i*5,300,200);
+  R.G[f]=+(performance.now()-t).toFixed(1);ctx.restore();
+}
+log('G ctx.filter cost (20 fills):',JSON.stringify(R.G));
+
+// ── H: createImageBitmap from canvas (GPU upload path) ──
+R.H={};
+try{const t=performance.now();const bm=await createImageBitmap(cv);R.H.ms=+(performance.now()-t).toFixed(1);R.H.w=bm.width;R.H.h=bm.height;bm.close();}catch(e){R.H.err=e.message;}
+log('H createImageBitmap:',JSON.stringify(R.H));
+
+// ── I: OffscreenCanvas + transferControlToOffscreen (worker render path) ──
+R.I={transfer:typeof cv.transferControlToOffscreen==='function',oc:typeof OffscreenCanvas!=='undefined'};
+try{const oc=new OffscreenCanvas(200,200);const octx=oc.getContext('2d');octx.font='400 40px A0';R.I.ocFontWorks=+octx.measureText('Hi').width.toFixed(2)>0;}catch(e){R.I.err=e.message;}
+log('I offscreen:',JSON.stringify(R.I));
+
+window.__P2__=R;document.title='P2-DONE';
+</script></body></html>

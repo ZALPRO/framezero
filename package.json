@@ -1,0 +1,30 @@
+{
+  "name": "framezero",
+  "version": "1.0.0",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node tools/test.mjs typography && node tools/test.mjs render && node tools/test.mjs document",
+    "test:syntax": "bash tools/syntax.sh",
+    "test:css": "node tools/cssaudit.mjs",
+    "test:smoke": "node tools/smoke.mjs",
+    "gate": "npm run test:syntax && npm run test:css && npm test && npm run test:smoke",
+    "brand": "node tools/brand.mjs",
+    "uishot": "node tools/uishot.mjs"
+  },
+  "keywords": [
+    "motion-design",
+    "kinetic-typography",
+    "video-editor",
+    "webgl",
+    "variable-fonts",
+    "canvas"
+  ],
+  "author": "",
+  "license": "MIT",
+  "description": "Browser-native motion-design & kinetic-type studio: comp, variable-font typography, effects, masks/mattes, media, audio and video export with zero runtime deps.",
+  "dependencies": {
+    "playwright": "^1.63.0"
+  },
+  "type": "module"
+}

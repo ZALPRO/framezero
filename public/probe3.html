@@ -1,0 +1,147 @@
+<!doctype html><html><head><meta charset="utf-8"><title>p3</title></head><body>
+<canvas id="c" width="900" height="700"></canvas><pre id="out"></pre>
+<script type="module">
+const out=document.getElementById('out');const log=(...a)=>{out.textContent+=a.join(' ')+'\n';};
+const R={};
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+async function mkFace(fam,url,desc){const b=await (await fetch(url)).arrayBuffer();const f=new FontFace(fam,b,desc);await f.load();document.fonts.add(f);await document.fonts.ready;return f;}
+await mkFace('VZ','/fonts/Vazirmatn-var.woff2',{weight:'100 900'});
+await mkFace('IT','/fonts/Inter-var.ttf',{weight:'100 900'});
+
+const seg=s=>[...new Intl.Segmenter('und',{granularity:'grapheme'}).segment(s)].map(x=>x.segment);
+
+function inkBoxes(c,w,h,thr=40){
+  const d=c.getContext('2d').getImageData(0,0,w,h).data;
+  const boxes=[];let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9,count=0;
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4;if(d[i+3]>thr){count++;if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;}}
+  return {count,minX,maxX,minY,maxY};
+}
+// column histogram -> find ink gaps to locate clusters
+function colInk(c,w,h,thr=40){
+  const d=c.getContext('2d').getImageData(0,0,w,h).data;const cols=new Array(w).fill(0);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){if(d[(y*w+x)*4+3]>thr)cols[x]++;}
+  return cols;
+}
+
+/* ── T1: cluster box offsets with textAlign='left', direction='rtl' ── */
+function prefixOffsets(text,fam,size,dir,tracking=0){
+  ctx.save();ctx.font=`400 ${size}px ${fam}`;ctx.direction=dir;ctx.letterSpacing=tracking+'px';
+  const cl=seg(text);const total=ctx.measureText(text).width;
+  const pre=[0];for(let i=0;i<cl.length;i++)pre.push(ctx.measureText(cl.slice(0,i+1).join('')).width);
+  ctx.restore();
+  const boxes=cl.map((ch,i)=>{
+    const a=pre[i],b=pre[i+1],adv=b-a;
+    // logical->visual placement when anchored LEFT:
+    //   ltr: visual x = a
+    //   rtl: visual x = total - b
+    const vx = dir==='rtl' ? total-b : a;
+    return {i,ch,adv:+adv.toFixed(2),vx:+vx.toFixed(2),x0:+Math.min(vx,vx+adv).toFixed(2),x1:+Math.max(vx,vx+adv).toFixed(2)};
+  });
+  return {total:+total.toFixed(2),boxes};
+}
+const FA='سلام دنیا';  // سلام دنیا
+const EN='Frame Zero';
+R.t1={};
+R.t1.rtl=prefixOffsets(FA,'VZ',64,'rtl');
+R.t1.ltr=prefixOffsets(EN,'IT',64,'ltr');
+log('T1 rtl boxes:',JSON.stringify(R.t1.rtl.boxes));
+log('T1 ltr boxes:',JSON.stringify(R.t1.ltr.boxes));
+
+/* ── T2: verify boxes against ACTUAL ink by drawing whole line at x=0,left ── */
+function renderWhole(text,fam,size,dir,W,H,padX=40,padY=20){
+  const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');
+  g.font=`400 ${size}px ${fam}`;g.direction=dir;g.textAlign='left';g.textBaseline='top';
+  g.fillStyle='#fff';g.fillText(text,padX,padY);
+  return {c,g,layout:prefixOffsets(text,fam,size,dir)};
+}
+R.t2={};
+const A=renderWhole(FA,'VZ',64,'rtl',600,140);
+const cols=colInk(A.c,600,140);
+let runs=[],start=null;
+for(let x=0;x<600;x++){if(cols[x]>0&&start===null)start=x;if(cols[x]===0&&start!==null){runs.push([start,x-1]);start=null;}}
+if(start!==null)runs.push([start,599]);
+R.t2.inkRuns=runs;
+R.t2.predicted=A.layout.boxes.filter(b=>b.ch.trim()).map(b=>[Math.round(b.x0)+40,Math.round(b.x1)+40]);
+// cluster-level comparison: does each predicted box contain ink?
+R.t2.boxHasInk=A.layout.boxes.map(b=>{const s=Math.max(0,Math.round(b.x0)+40),e=Math.min(599,Math.round(b.x1)+40);let n=0;for(let x=s;x<=e;x++)n+=cols[x];return n>0;});
+R.t2.allBoxesHaveInk=R.t2.boxHasInk.filter((v,i)=>A.layout.boxes[i].ch.trim()).every(Boolean);
+log('T2 ink runs (actual):',JSON.stringify(R.t2.inkRuns));
+log('T2 predicted boxes  :',JSON.stringify(R.t2.predicted));
+log('T2 every non-space box contains ink:',R.t2.allBoxesHaveInk);
+
+/* ── T3: BUFFER approach — render whole line once, then blit per cluster ── */
+function bufferBlit(text,fam,size,dir,W,H,transforms,padX=40,padY=20){
+  // 1) shape once into buffer
+  const buf=document.createElement('canvas');buf.width=W;buf.height=H;const bg=buf.getContext('2d');
+  bg.font=`400 ${size}px ${fam}`;bg.direction=dir;bg.textAlign='left';bg.textBaseline='top';
+  bg.fillStyle='#fff';bg.fillText(text,padX,padY);
+  const lay=prefixOffsets(text,fam,size,dir);
+  // 2) out canvas
+  const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');
+  lay.boxes.forEach((b,i)=>{
+    const t=transforms[i]||{};
+    const sx=padX+b.x0, sw=Math.max(1,b.x1-b.x0), sy=0, sh=H;
+    const cx=padX+(b.x0+b.x1)/2, cy=H/2;
+    g.save();
+    g.globalAlpha=t.opacity??1;
+    g.translate(cx+(t.dx||0),cy+(t.dy||0));
+    if(t.rot)g.rotate(t.rot*Math.PI/180);
+    if(t.scale)g.scale(t.scale,t.scale);
+    g.translate(-cx,-cy);
+    g.drawImage(buf,sx,sy,sw,sh,sx,sy,sw,sh);
+    g.restore();
+  });
+  return {c,layout:lay};
+}
+R.t3={};
+// identity transforms must reproduce whole-line ink EXACTLY (proves no joining loss)
+const ident=bufferBlit(FA,'VZ',64,'rtl',600,140,[]);
+const wholeInk=inkBoxes(A.c,600,140), blitInk=inkBoxes(ident.c,600,140);
+R.t3.whole=wholeInk.count; R.t3.blitIdentity=blitInk.count;
+R.t3.identityMatch=Math.abs(wholeInk.count-blitInk.count)/Math.max(1,wholeInk.count)<0.02;
+log('T3 whole-string ink:',wholeInk.count,' buffer-blit identity ink:',blitInk.count,' match(<2%):',R.t3.identityMatch);
+
+// animated: scale+rotate+fade alternating clusters
+const anim=FA?seg(FA).map((c,i)=>({opacity:i%2?1:0.45,scale:i%2?1:1.35,rot:i%2?0:-8,dy:i%2?0:-12})):[];
+const animated=bufferBlit(FA,'VZ',64,'rtl',600,140,anim);
+R.t3.animatedInk=inkBoxes(animated.c,600,140).count;
+R.t3.animatedDiffers=Math.abs(R.t3.animatedInk-R.t3.blitIdentity)>20;
+log('T3 animated ink:',R.t3.animatedInk,' differs from identity:',R.t3.animatedDiffers);
+
+// does the blit preserve JOINING? compare per-cluster ink density vs naive separate draw
+const naive=(()=>{const c=document.createElement('canvas');c.width=600;c.height=140;const g=c.getContext('2d');
+  g.font='400 64px VZ';g.textBaseline='top';g.fillStyle='#fff';let x=40;
+  for(const ch of seg(FA)){g.fillText(ch,x,20);x+=g.measureText(ch).width;}return inkBoxes(c,600,140).count;})();
+R.t3.naiveSeparateInk=naive;
+R.t3.bufferPreservesJoining=R.t3.blitIdentity<naive*0.9;
+log('T3 naive separate-draw ink (joining broken):',naive,'→ buffer approach preserves joining:',R.t3.bufferPreservesJoining);
+
+/* ── T4: measurement cost ── */
+R.t4={};
+let t=performance.now();for(let i=0;i<100;i++)prefixOffsets(FA,'VZ',64,'rtl');
+R.t4.prefix100=+(performance.now()-t).toFixed(1);
+t=performance.now();for(let i=0;i<100;i++){ctx.font='400 64px VZ';ctx.measureText(FA);}
+R.t4.simple100=+(performance.now()-t).toFixed(1);
+t=performance.now();for(let i=0;i<50;i++)bufferBlit(FA,'VZ',64,'rtl',600,140,[]);
+R.t4.blit50=+(performance.now()-t).toFixed(1);
+log('T4 cost: 100x prefixLayout=',R.t4.prefix100,'ms  100x measureText=',R.t4.simple100,'ms  50x bufferBlit=',R.t4.blit50,'ms');
+
+/* ── T5: long-text scaling ── */
+R.t5={};
+for(const n of [10,50,200,600]){
+  const txt=Array.from({length:n},(_,i)=>'ab').join('').slice(0,n*2);
+  t=performance.now();prefixOffsets(txt,'IT',32,'ltr');R.t5['layout_'+n+'ch']=+(performance.now()-t).toFixed(2);
+}
+log('T5 layout cost by length:',JSON.stringify(R.t5));
+
+/* ── T6: visual proof — write the animated result to the main canvas ── */
+ctx.fillStyle='#0d0f14';ctx.fillRect(0,0,900,700);
+ctx.drawImage(A.c,10,10);
+ctx.drawImage(ident.c,10,170);
+ctx.drawImage(animated.c,10,330);
+ctx.fillStyle='#00e5a0';ctx.font='12px IT';ctx.fillText('whole string (reference)',10,165);
+ctx.fillText('buffer-blit identity (must match reference)',10,325);
+ctx.fillText('buffer-blit animated per-cluster (joining preserved)',10,485);
+
+window.__P3__=R;document.title='P3-DONE';
+</script></body></html>
