@@ -1,6 +1,6 @@
 # FrameZero — وضعیت صادقانهٔ کامل بودن
 
-آخر به‌روزرسانی: هویت بصری (لوگوی AI، ست آیکن، پولیش کروم) کامل و تست‌شد؛ فقط مهندسی انتشار مانده.
+آخر به‌روزرسانی: هویت بصری و مهندسی انتشار هر دو کامل شد؛ مخزن محلی کامیت و تگ v1.0.0 خورد و فقط push به ریموت در دست کاربر است.
 دروازهٔ تست (همه باید سبز باشند قبل از عبور):
 
 | دروازه | فرمان | نتیجه |
@@ -111,16 +111,24 @@
 - ویرایش waveform (trim/crossfade)، افکت‌های صدا، تصویر متوالی (image sequence)
 - کتابخانهٔ پرست/تمپلیت، همکاری چندکاربره
 
-## آمادگی انتشار گیت‌هاب — چک‌لیست مرحلهٔ پایانی
+## آمادگی انتشار گیت‌هاب — انجام‌شده ✅
 
-محصول از نظر قابلیت/ظاهر برای انتشار عمومی آماده است؛ تنها این بستهٔ مهندسی انتشار مانده:
+| قلم | وضعیت |
+|---|---|
+| `README.md` دوزبانه (EN + فارسی) با لوگو، اسکرین‌شات‌ها، جدول قابلیت‌ها، quick-start و Limitations صادقانه | ✅ |
+| `LICENSE` (MIT) + `NOTICE.md` برای چهار فونت OFL و ذکر منشأ AI لوگو | ✅ |
+| `.gitignore` (node_modules، test-results، .fontcache، artefactهای probe) | ✅ |
+| CI گیت‌هاب (`.github/workflows/ci.yml`): سرور + playwright + هر شش gate به‌عنوان شرط هر push/PR | ✅ |
+| اسکرین‌شات‌های رسمی در `docs/` (app، hud، topbar، left، right، boot، favicon-montage، logo) | ✅ |
+| اسکریپت‌های npm: `start`، `test`، `test:syntax`، `test:css`، `test:smoke`، `gate`، `brand`، `uishot` | ✅ |
+| مخزن: `git init -b main`، کامیت `921d741` (۸۹ فایل، بدون node_modules)، تگ `v1.0.0` | ✅ |
 
-1. `README.md` دو زبانه (EN اصلی + فارسی) با بج‌ها، لوگو، اسکرین‌شات‌ها
-   (`test-results/app.png`، `app-hud.png`)، جدول قابلیت‌ها، quick-start وLimitations صادقانه.
-2. `LICENSE` (MIT یا Apache-2.0 — باید با OFL فونت‌ها و MediaRecorder سازگار بماند) +
-   `NOTICE` برای فونت‌های OFL و نامزدهای لوگو.
-3. `.gitignore` (test-results/، node_modules/، probe*.html اگر داخلی‌اند).
-4. CI گیت‌هاب Actions: `syntax.sh` + `cssaudit` + سه سوئیت `test.mjs` + `smoke.mjs`
-   (playwright روی ubuntu-latest) به‌عنوان gate هر پوش.
-5. اسکرین‌شات/گیف رسمی در `docs/` + favicon و Open Graph برای Pages.
-6. انتشار: تگ `v1.0.0`، Release notes از همین STATUS، و GitHub Pages برای دموی زنده.
+### تنها کاری که بیرون از این سندباکس مانده (دست کاربر)
+
+```bash
+cd app
+git remote add origin git@github.com:<USER>/framezero.git   # یا https
+git push -u origin main --tags
+```
+و در تنظیمات مخزن: Pages → source «GitHub Actions» یا branch `main`/root (دموی زنده)،
+و Actions بعد از اولین push خودبه‌خود gate را می‌دواند. بدون توکن نمی‌توان از اینجا push کرد.
