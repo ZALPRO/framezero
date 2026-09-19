@@ -23,8 +23,8 @@
   "author": "",
   "license": "MIT",
   "description": "Browser-native motion-design & kinetic-type studio: comp, variable-font typography, effects, masks/mattes, media, audio and video export with zero runtime deps.",
-  "dependencies": {
+  "type": "module",
+  "devDependencies": {
     "playwright": "^1.63.0"
-  },
-  "type": "module"
+  }
 }
