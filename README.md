@@ -9,6 +9,7 @@
   GPU-minded timeline app, served statically, with zero runtime dependencies.
 </p>
 <p align="center">
+  <img src="https://github.com/ZALPRO/framezero/actions/workflows/ci.yml/badge.svg" alt="CI">
   <img src="https://img.shields.io/badge/license-MIT-00e5a0?style=flat-square" alt="MIT license">
   <img src="https://img.shields.io/badge/runtime%20dependencies-0-00e5a0?style=flat-square" alt="zero runtime dependencies">
   <img src="https://img.shields.io/badge/test%20gate-478%20checks%20green-00e5a0?style=flat-square" alt="478 green checks">
