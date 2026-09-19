@@ -26,9 +26,10 @@ jobs:
             sleep 1
           done
           curl -sf http://127.0.0.1:4173/index.html > /dev/null
-      - name: Syntax + CSS audit
+      - name: Syntax + CSS audit + release hygiene
         run: |
           bash tools/syntax.sh
+          node tools/hygiene.mjs
           node tools/cssaudit.mjs
       - name: Model suites
         run: |
