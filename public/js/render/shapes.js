@@ -10,17 +10,17 @@
 import { clamp, lerp, parseColor, rgb2css, round } from '../core/base.js';
 
 export const SHAPE_TYPES = [
-  { id: 'solid',     name: 'Solid',         icon: '■' },
-  { id: 'rect',      name: 'Rectangle',     icon: '▭' },
-  { id: 'ellipse',   name: 'Ellipse',       icon: '◯' },
-  { id: 'triangle',  name: 'Triangle',      icon: '△' },
-  { id: 'polygon',   name: 'Polygon',       icon: '⬠' },
-  { id: 'star',      name: 'Star',          icon: '★' },
-  { id: 'line',      name: 'Line',          icon: '╱' },
-  { id: 'gradient',  name: 'Gradient',      icon: '▨' },
-  { id: 'grid',      name: 'Grid',          icon: '▦' },
-  { id: 'checker',   name: 'Checkerboard',  icon: '▚' },
-  { id: 'noise',     name: 'Noise field',   icon: '▓' },
+  { id: 'solid',     name: 'Solid',         icon: 'shSolid' },
+  { id: 'rect',      name: 'Rectangle',     icon: 'shRect' },
+  { id: 'ellipse',   name: 'Ellipse',       icon: 'shEllipse' },
+  { id: 'triangle',  name: 'Triangle',      icon: 'shTriangle' },
+  { id: 'polygon',   name: 'Polygon',       icon: 'shPolygon' },
+  { id: 'star',      name: 'Star',          icon: 'shStar' },
+  { id: 'line',      name: 'Line',          icon: 'shLine' },
+  { id: 'gradient',  name: 'Gradient',      icon: 'shGradient' },
+  { id: 'grid',      name: 'Grid',          icon: 'shGrid' },
+  { id: 'checker',   name: 'Checkerboard',  icon: 'shChecker' },
+  { id: 'noise',     name: 'Noise field',   icon: 'shNoise' },
 ];
 
 export const DEFAULT_SHAPES = {

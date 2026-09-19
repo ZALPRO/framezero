@@ -1,134 +1,94 @@
-# FrameZero — وضعیت صادقانهٔ کامل بودن
+# FrameZero — project status
 
-آخر به‌روزرسانی: هویت بصری و مهندسی انتشار هر دو کامل شد؛ مخزن محلی کامیت و تگ v1.0.0 خورد و فقط push به ریموت در دست کاربر است.
-دروازهٔ تست (همه باید سبز باشند قبل از عبور):
+Living engineering record. Everything below is current as of the v1.1.0 tag.
+The product is public-release ready: `npm ci && npm start`, no build step,
+no runtime dependencies.
 
-| دروازه | فرمان | نتیجه |
-|---|---|---|
-| سینتکس ۱۳ ماژول | `./tools/syntax.sh` | ✅ ۱۳/۱۳ |
-| ممیزی CSS (کلاس‌های JS بدون استایل) | `node tools/cssaudit.mjs` | ✅ ۰ گمشده از ۷۴ |
-| موتور تایپوگرافی | `node tools/test.mjs typography` | ✅ ۱۰۷ / ۰ فیل |
-| هستهٔ رندر (۲ بک‌اند، ۱۶ افکت، ماسک/matte، media) | `node tools/test.mjs render` | ✅ ۹۴ / ۰ فیل |
-| مدل سند + ریزالوِر + آندو + ترمیم فایل خراب | `node tools/test.mjs document` | ✅ ۱۰۶ / ۰ فیل |
-| **محصول واقعی در مرورگر** (بوت تا خروجی ویدیو) | `node tools/smoke.mjs` | ✅ ۹۷ / ۰ فیل |
+## What ships
 
-## مرحلهٔ هویت بصری (کامل و تست‌شده)
+- **Editor shell** — layers / assets / effects / fonts panels, inspector with
+  keyframed properties, node-graph & value-curve lenses over the same scene
+  graph, command palette, keyboard-first workflow, full SVG icon set
+  (`public/js/ui/icons.js`, ~110 icons on a 24×24 / 1.7-stroke grid).
+- **Document model** (`public/js/core/document.js`) — project/comp/layers with
+  undo-redo, corruption-repairing deserialisation, keyframe tracks with an
+  easing catalogue, masks (add/subtract/intersect + feather/invert), alpha &
+  luma track mattes.
+- **Render engine** (`public/js/render/*`) — one scene graph, two complete
+  backends (WebGL2 primary, Canvas2D fallback) held to pixel parity by the
+  test gate; raster cache, effect-chain cache, proxy scaling, draft/exact
+  modes, honest frame-time HUD.
+- **Typography** (`public/js/render/typography.js`, `public/js/core/fonts.js`) —
+  variable-font axis control, per-glyph animators, RTL/Persian shaping-safe
+  layout, Font Clearance Report (per-font glyph-coverage audit).
+- **v1.1 editing surface** — adjustment layers, time remap (rate + reverse),
+  boundary transitions (cross / wipeL / wipeR / slideL / slideR), comp markers
+  (M, Shift+M, Shift+, , Shift+.), Lumetri-style scopes (waveform, histogram,
+  vectorscope), safe-area & thirds overlays. Parity matrix vs. After Effects
+  and Premiere Pro: `docs/FEATURE-GAP.md`.
+- **Export** — real WebM (VP9+Opus) through MediaRecorder on the viewport
+  stream plus master audio (`tools/export-demo.mjs` records the shipped demo
+  through this product path), PNG frame export, project JSON save/open.
+- **Release engineering** — README, LICENSE, NOTICE (font/music/painting
+  attributions), CI workflow, brand kit (`public/brand/`), docs/.
+  Tags: `v1.0.0` (studio), `v1.1.0` (editing surface).
 
-- لوگو: چهار نامزد با تولید تصویر AI؛ نامزد ۱ انتخاب شد چون تنها طرحی است که هر
-  سه ایدهٔ نام محصول را رمزگذاری می‌کند (براکت‌های گوشه = فریم/ویوپورت، خط عمودی =
-  playhead، حلقهٔ مرکزی = Zero / پژواک لوزی کی‌فریم) و سیلوئتش در ۱۶px نمی‌شکند.
-  نامزدها در `public/logos/` مانده‌اند تا کاربر بتواند عوض کند.
-- شفاف‌سازی و رنگ: `tools/brand.mjs` پس‌زمینهٔ تیره را با رمپ luminance کلید می‌کند
-  (<۴۰ → α=۰، >۹۰ → α=۲۵۵) و سپس RGB را روی accent دقیق محصول (#00E5A0) می‌نشاند تا
-  مارک در هر سطحی «همان تم» باشد. خروجی: `public/brand/logo.png` (۵۱۲)،
-  `logo-180.png`، `favicon.png` (۳۲) — هر سه شفاف، بدون وابستگی به تصویرسازی دستی.
-- ست آیکن: `public/js/ui/icons.js` — ۳۴ آیکن inline-SVG روی شبکهٔ ۲۴×۲۴ با stroke 1.7
-  و currentColor (ترنسپورت، نوع لایه، eye/lock/solo، ماسک/مت/کی، ایمپورت/خروجی و…).
-  API: `iconSVG(name,size)`، `iconEl(name,cls,size)`، `setIcon(elm,name,size)`؛ نام
-  ناشناخته رشتهٔ خالی برمی‌گرداند (fail-safe). هر svg یک `data-icon` دارد تا تست‌ها
-  واقعاً بتوانند وضعیت آیکن را بپرسند.
-- جایگزینی همهٔ گلیف‌ها/ایموجی‌های کروم: ترنسپورت، pane-actions، دکمه‌های HUD/
-  Benchmark/Clearance/⌘K، Open/Save/Export، ردیف لایه‌ها (eye/solo/lock/نوع)، assetها،
-  افکت‌ها، ماسک‌ها، animatorها، resetها، auto-key و دکمه‌های in/out.
-- پولیش کروم: اسکرول‌بار فایرفاکس (`scrollbar-width/color`)، `::selection` با accent،
-  حلقهٔ `:focus-visible` یکدست برای کل کروم، تراز flex آیکن+برچسب در دکمه‌ها.
-- تست: سکشن ۱۶ اسموک («identity») — تعداد آیکن‌ها، fail-safe بودن iconSVG، favicon به
-  برند، لود شدن تصویر wordmark، آیکن‌دار بودن همهٔ دکمه‌های ترنسپورت، svg در ردیف
-  لایه‌ها، و **اسکن regexp ایموجی روی متن واقعی کروم** (هیچ نمانده).
-  درس ثبت‌شده: سلکتور غلط در این اسکن یعنی تست تهی؛ سلکتورها با idهای واقعی
-  (`#topbar/#left/#right/#timeline`) اصلاح شدند و دو گلیف جاافتاده (🔑 و ←) همین‌طور پیدا شد.
+## Test gate
 
-## مرحلهٔ ماسک و matte (کامل و تست‌شده)
+`npm run gate` = syntax audit + CSS audit + three headless suites + browser
+smoke suite. Current counts: **app 117 · render 134 · document 119 ·
+typography 108** assertions, zero failures; CSS audit reports 0 missing
+classes. Notable regression guards:
 
-- ماسک‌ها: ellipse/rect، حالت‌های add/subtract/intersect، feather، invert،
-  opacity، کلید روشن/خام برای هر آیتم و کل استک؛ مختصات لایه-لوکال؛ مرکز ماسک
-  قابل کی‌فریم. در مرحلهٔ راسترایز اعمال می‌شوند → هر دو بک‌اند به‌ساخت یکسان.
-- Track matte: alpha و luma با invert؛ لایهٔ منبع matteOnly می‌شود (مثل AE از کامپ
-  پنهان)؛ مات با ماتریس نسبیِ دو لایه نگاشت می‌شود پس با ترنسفورم منبع حرکت می‌کند.
-- ترتیب مستند: matte یک حلقه از زنجیرهٔ خود لایه است (مثل Track Matte Key در
-  Premiere) چون handle در WebGL2 تکسچر است و سطح دوبعدی برای برش بعد از آپلود ندارد.
-- تست‌ها: سطح پیکسل (مساحت بریده، لبهٔ feather نیمه‌شفاف، حفرهٔ subtract، luma
-  سیاه/سفید، دنباله‌روی ترنسفورم) + توافق پیکسلی دو بک‌اند + مدل/سریالایز/ترمیم.
+- `no emoji left anywhere in the chrome` — fails if a Unicode glyph is ever
+  used as an icon again.
+- Backend parity bands (WebGL2 vs Canvas2D) on blur/bloom/blend/matte paths.
+- Pixel-signature checks on every scene of the shipped 30 s reference piece
+  (`tools/smoke.mjs`, section 17).
+- gl2 parity for adjustment layers, wipes and cross dissolves.
 
-## مرحلهٔ رسانه: ویدیو، صدا، خروجی (کامل و تست‌شده)
+## Performance work log (highlights)
 
-- ایمپورت: تصویر (ImageBitmap)، ویدیو (متادیتا + المنت)، صدا (decodeAudioData +
-  envelopeٔ ۹۰۰ سطلی برای waveform). دکود فقط در زمان ایمپورت؛ حلقهٔ رندر هرگز
-  وسط فریم منتظر دکودر نمی‌ماند.
-- سینک ویدیو: seek در اسکراب، play/pause با ترنسپورت، اصلاح drift فقط وقتی
-  اختلاف >۰٫۲۵s؛ فریم جاری در `resolved.media.frame` مهر می‌خورد و بخشی از
-  کلید کش راسترایز است → فریم کهنه هرگز سرو نمی‌شود.
-- صدا: Voiceها با master-gain؛ شروع در پخش، مرگ در توقف، re-base در اسکراب و در
-  نقطهٔ لوپ؛ ولوم/موت per-layer که سریالایز می‌شود.
-- waveform در تایم‌لاین از envelopeٔ asset کشیده می‌شود.
-- خروجی ویدیو: MediaRecorder روی captureStream بوم + master صدا → WebM واقعی
-  (برچسب صادق: ضبط هم‌زمان، نه انکودر آفلاین). تست: ۱۱۱KB بایت رمزگذاری‌شده.
-- تست‌ها با رسانهٔ واقعی: WAV سنتزشده بایت‌به‌بایت و WebM ضبط‌شده داخل مرورگر،
-  هر دو از مسیر واقعی ایمپورت؛ اسکراب ویدیو فریم‌های متفاوت می‌دهد.
+- Canvas2D effect-chain output cache: static chains on unchanged rasters run
+  once; keys carry raster revision, matte revision and half-pixel-quantised
+  params so keyed focus pulls stay cached in 0.5 px buckets. Clocked chains
+  (grain / turbulence / glitch) never cache.
+- Text rasters no longer hash comp time when no animators exist (the trap the
+  shape branch already avoided) — static type stopped re-rasterising per frame.
+- `gaussianBlur` Canvas2D uses a downsample pyramid above radius 6; the exact
+  CSS-filter path remains for radius ≤ 6, which is what parity tests exercise.
+- Exporter pre-warms every scene (0.125 s steps) before MediaRecorder starts,
+  and the transport tracks the wall clock while recording so a slow software
+  frame can never stretch the piece.
+- Layout: the timeline canvas' intrinsic width (duration × px/s) used to
+  propagate into the page grid and blow the centre column to ~3300 px on long
+  comps; `#main`/`#timeline` are now `min-width: 0`.
 
-## باگ‌های واقعی که همین مرحله پیدا و رفع شدند
+## Repository hygiene
 
-1. **رقابت دست‌به‌دست شدن رندرر** — `state.renderer` قبل از تمام‌شدن `attach`
-   منتشر می‌شد؛ یک rAF داخل آن پنجره → `renderer not attached`. حالا انتشار فقط
-   پس از attach و با توکن برای لغو درخواست‌های همپوش.
-2. **پالت فرمان فرمان اشتباه اجرا می‌کرد** — ایندکس لیستِ فیلترشده روی لیست
-   کامل اعمال می‌شد؛ یعنی هر جستجو + Enter = فرمان دلخواهِ نیست. (`palVisible`)
-3. **خروجی PNG از رندررِ نابودشده می‌خواند** — `toDataURL` قبل از گرفتن رندررِ
-   جدید صدا زده می‌شد → بدون دانلود. حالا پس از hand-off و با رندر صریح.
-4. **نام پروژه توسط فیلد کهنهٔ DOM بازنویسی می‌شد** → `name.fz.fz.json`.
-   حالا مدل مالک نام است و فقط رویداد change فیلد آن را می‌نویسد.
-5. **تایپوگرافی سینتیک ناپدید می‌شد** — انیماتور فقط معنای «to» داشت (props =
-   مقصد) پس reveal پلکانی غیرقابل بیان بود و دمو بعد از t≈1s متن را محو می‌کرد.
-   حالا `mode: 'from' | 'to'` صریح در مدل + کنترل Direction در پنل + ۵ Assertion جدید.
-6. **پیش‌نمایش draft بزرگ‌تر و بریده بود** — کامپوزیت هندسهٔ فضای کامپ را 1:1 روی
-   سطح کوچک‌تر می‌کشید (فقط exact درست بود، پس پنهان می‌ماند). حالا `viewScale`
-   در رندرر + تست «وفاداری پروکسی»: draft در برابر exact با **۰٫۰٪ اختلاف پیکسل**.
+- No debug scaffolding ships: one-off probe and debug scripts were removed
+  at v1.1 cleanup; kept tooling is `smoke`, `test`, `summarize`, `export-demo`,
+  `cssaudit`, `syntax.sh`, `brand`, `uishot`, `shot`, `diag`, `fontinfo.py`,
+  `brush.mjs`, `measure.mjs`, `net.mjs`, `instantiate.py`.
+- Persian text appears only where it *is* the product: the reference demo
+  project (`public/projects/persian-epic.fz.json`), the default project's RTL
+  showcase layer, and shaping test fixtures. All prose, comments and docs are
+  English.
+- Binary artefacts (`exports/`, `test-results/`, `.fontcache/`) are gitignored.
 
-## اصلاح کیفیت خودِ تست‌ها (تست‌هایی که دروغ می‌گفتند)
+## Publishing
 
-- سوئیت رندر دو Assertion ماشین‌خاص داشت («WebGL2 نمی‌تواند ۶۰fps» و «Canvas2D
-  حتماً سریع‌تر است») که با نویز زمان‌بندی سندباکس وارونه می‌شدند. حالا: فقط وقتی
-  اختلاف قاطع است (>۲۵٪) قاعده باید با برندهٔ اندازه‌گیری‌شده توافق کند؛ وگرنه
-  ثبت به‌عنوان info. در اجرای پایدار: WebGL2=85.8ms در برابر Canvas2D=0.51ms
-  روی SwiftShader → اختلاف ۱۶۸× و قاعده درست.
-- Assertion «تعداد فریم پلی‌بک» حالا نسبت به زمان فریمِ همان ماشین است، نه عدد ثابت.
-- Assertion پرفورمنس playback حالا «تنزل زمانی» (نشتی) را می‌سنجد، نه آستانهٔ خودساخته.
+The repository is complete locally; pushing is the owner's step (needs GitHub
+SSH credentials outside this sandbox):
 
-## پرفورمنس — صادقانه
-
-- این سندباکس GPU ندارد (SwiftShader، رسترایزر نرم‌افزاری). صحنهٔ دمو با بلوم +
-  بلور گوسین + متن متغیر در draft ≈۶fps. این عدد روی سخت‌افزار واقعی نماینده نیست.
-- روی همین ماشین، قاعدهٔ انتخاب بک‌اند درست کار می‌کند: برای کامپوزیت دوبعدی روی
-  GL نرم‌افزاری، Canvas2D برندهٔ قاطع است؛ روی GPU سخت‌افزاری مسیر WebGL2 سریع است.
-- حالت بی‌کار هزینهٔ رندر صفر دارد (حلقه فقط وقتی `needsRender` یا پخش فعال است).
-- اندازه‌گیری واقعی روی GPU سخت‌افزاری هنوز انجام نشده — ادعایی دربارهٔ آن نیست.
-
-## ساخته‌نشده (به ترتیب اولویت)
-
-- ماسک مسیر/pen (فعلاً ellipse/rect) و لایهٔ adjustment و precomp/nesting
-- صف رندر آفلاین با پیشرفت و انکودر mp4/H.264 (فعلاً WebM هم‌زمان)
-- بک‌اند WebGPU (فعلاً WebGL2 + Canvas2D)
-- ویرایش waveform (trim/crossfade)، افکت‌های صدا، تصویر متوالی (image sequence)
-- کتابخانهٔ پرست/تمپلیت، همکاری چندکاربره
-
-## آمادگی انتشار گیت‌هاب — انجام‌شده ✅
-
-| قلم | وضعیت |
-|---|---|
-| `README.md` دوزبانه (EN + فارسی) با لوگو، اسکرین‌شات‌ها، جدول قابلیت‌ها، quick-start و Limitations صادقانه | ✅ |
-| `LICENSE` (MIT) + `NOTICE.md` برای چهار فونت OFL و ذکر منشأ AI لوگو | ✅ |
-| `.gitignore` (node_modules، test-results، .fontcache، artefactهای probe) | ✅ |
-| CI گیت‌هاب (`.github/workflows/ci.yml`): سرور + playwright + هر شش gate به‌عنوان شرط هر push/PR | ✅ |
-| اسکرین‌شات‌های رسمی در `docs/` (app، hud، topbar، left، right، boot، favicon-montage، logo) | ✅ |
-| اسکریپت‌های npm: `start`، `test`، `test:syntax`، `test:css`، `test:smoke`، `gate`، `brand`، `uishot` | ✅ |
-| مخزن: `git init -b main`، کامیت `921d741` (۸۹ فایل، بدون node_modules)، تگ `v1.0.0` | ✅ |
-
-### تنها کاری که بیرون از این سندباکس مانده (دست کاربر)
-
-```bash
-cd app
-git remote add origin git@github.com:<USER>/framezero.git   # یا https
+```
+git remote add origin git@github.com:<USER>/framezero.git
 git push -u origin main --tags
 ```
-و در تنظیمات مخزن: Pages → source «GitHub Actions» یا branch `main`/root (دموی زنده)،
-و Actions بعد از اولین push خودبه‌خود gate را می‌دواند. بدون توکن نمی‌توان از اینجا push کرد.
+
+## Roadmap
+
+Precomps with essential properties · sandboxed expressions · offline render
+queue with H.264/mp4 · WebGPU backend · ripple/roll/slip trim tools · waveform
+editing (trim/crossfade) · audio effects · image sequences · preset library ·
+motion tracking · multi-user collaboration.

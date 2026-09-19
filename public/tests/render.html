@@ -658,6 +658,55 @@ CK('9'); group='9. masks & track mattes'; curTable=null;
 }
 
 /* ═══ 10. media rasters ═══ */
+CK('11'); group='11. display styles & halftone (the reference-piece look)'; curTable=null;
+{
+  const W=520,H=260;
+  const EXTR='#3a2a00', HL='#ffe14d';
+  const scene={width:W,height:H,background:'#141414',layers:[
+    {id:'band',type:'shape',visible:true,opacity:1,blend:'normal',width:W,height:90,
+     resolved:{position:[W/2,H-45],scale:[1,1],rotation:0,shape:{type:'solid'},style:{fill:'#c9c2b4',fillOpacity:1}},
+     effects:[{id:'halftone',enabled:true,params:{cell:8,angle:0,ink:'#0b0d10',mix:0.9,modulation:0}}]},
+    {id:'t',type:'text',visible:true,opacity:1,blend:'normal',
+     resolved:{position:[W/2,70],scale:[1,1],rotation:0,
+       text:{text:'غریب از پارسی',family:'Vazirmatn',size:62,weight:800,leading:1.3,color:'#ffd21f',
+             extrude:{depth:10,angle:90,color:EXTR},highlight:{phrase:'پارسی',color:HL}},
+       animators:[]}},
+  ]};
+  const outs={};
+  for(const kind of ['webgl2','canvas2d']){
+    const c=mkCanvas(W,H); const r=new Renderer();
+    await r.attach(c,{preferred:kind,width:W,height:H,dpr:1});
+    r.renderFrame(scene,0,registry);
+    const rb=r.readback();
+    const o=mkCanvas(W,H); o.getContext('2d').drawImage(rb.canvas,0,0);
+    outs[kind]={canvas:o,data:o.getContext('2d').getImageData(0,0,W,H).data,units:r.rasters.get('t')?.report?.units};
+    r.destroy();
+  }
+  const near=(d,i,hex,tol)=>{const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+    return Math.abs(d[i]-r)<=tol&&Math.abs(d[i+1]-g)<=tol&&Math.abs(d[i+2]-b)<=tol&&d[i+3]>200;};
+  const count=(d,hex,tol=26)=>{let n=0;for(let i=0;i<d.length;i+=4)if(near(d,i,hex,tol))n++;return n;};
+  const exG=count(outs.webgl2.data,EXTR), hlG=count(outs.webgl2.data,HL);
+  chk('extrude lays down depth-coloured ink behind the glyphs',exG>400,`gl extrude px=${exG}`);
+  chk('highlighter paints the marker rectangle',hlG>300,`gl highlight px=${hlG}`);
+  // halftone: dot area of a uniform screen ≈ π·0.3² ≈ 28% of the band
+  let dark=0; const d=outs.webgl2.data;
+  for(let y=H-80;y<H-10;y++)for(let x=0;x<W;x++){const i=(y*W+x)*4;
+    if(0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2]<90)dark++;}
+  const pct=100*dark/(70*W);
+  chk('halftone dot coverage matches the analytic dot area',pct>18&&pct<40,`dark=${pct.toFixed(1)}% of band (expect ~28%)`);
+  // periodicity: a row through the dots flips light/dark about every cell/2
+  let flips=0,prev=null; const y0=H-45;
+  for(let x=0;x<W;x++){const i=(y0*W+x)*4;const lum=0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2];
+    const on=lum<120; if(prev!==null&&on!==prev)flips++; prev=on;}
+  chk('halftone period matches the cell size',flips>=(W/8)*1.6&&flips<=(W/8)*2.4,`flips=${flips} across ${W}px at cell 8 (2 edges per cell)`);
+  const dd=diff(outs.webgl2.canvas,outs.canvas2d.canvas);
+  chk('extrude+highlight+halftone agree across backends',dd.meanAbs<4&&dd.over12Pct<6,`meanAbs=${dd.meanAbs} over12=${dd.over12Pct}%`);
+  chk('extrude does not re-shape Persian (same unit count)',outs.webgl2.units===outs.canvas2d.units&&outs.webgl2.units>0,`units=${outs.webgl2.units}`);
+  show('display styles @webgl2',outs.webgl2.canvas);
+  show('display styles @canvas2d',outs.canvas2d.canvas);
+}
+
+/* ═══ 10. media rasters ═══ */
 CK('10'); group='10. media rasters'; curTable=null;
 {
   const W=200,H=200;
@@ -694,6 +743,85 @@ CK('10'); group='10. media rasters'; curTable=null;
   r.renderFrame({width:W,height:H,background:'transparent',layers:media(33)},0,registry,{assets});
   chk('the same frame hits the cache',r.frameStats.rasterCacheHits>0,`hits=${r.frameStats.rasterCacheHits}`);
   r.destroy();
+}
+
+
+/* ═══ adjustment layers · time remap · boundary transitions ═══ */
+{
+  const W = 200, H = 120;
+  const attach = async () => { const r = new Renderer(); await r.attach(mkCanvas(W, H), { preferred: 'canvas2d', width: W, height: H, dpr: 1 }); return r; };
+  const bar = (id, y, extra = {}) => ({ id, type: 'shape', visible: true, opacity: 1, blend: 'normal', width: 120, height: 40,
+    resolved: { position: [100, y], scale: [1, 1], rotation: 0, width: 120, height: 40, shape: { type: 'solid' }, style: { fill: '#ffffff', fillOpacity: 1 } },
+    effects: [], ...extra });
+  const scene = layers => ({ width: W, height: H, background: 'transparent', layers });
+  const grab = async (r, layers, t = 0) => { r.renderFrame(scene(layers), t, registry); const rb = r.readback(); const c = mkCanvas(W, H); c.getContext('2d').drawImage(rb.canvas, 0, 0); return c; };
+  const regionInk = (c, x0, y0, w, h) => { const d = c.getContext('2d', { willReadFrequently: true }).getImageData(x0, y0, w, h).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 30) n++; return n; };
+
+  // adjustment: the chain grades the composite below, and draws nothing itself
+  let r = await attach();
+  const plain = await grab(r, [bar('a', 60)]);
+  const adj = await grab(r, [bar('a', 60), { id: 'adj', type: 'shape', visible: true, opacity: 1, blend: 'normal', adjustment: true,
+    resolved: { position: [100, 60], scale: [1, 1], rotation: 0 }, effects: [{ id: 'gaussianBlur', enabled: true, params: { radius: 6, quality: 9 } }] }]);
+  const halo = regionInk(adj, 30, 30, 140, 60) - regionInk(plain, 30, 30, 140, 60);
+  chk('an adjustment layer blurs the composite below it', halo > 150, `halo=${halo}px of softened edge outside the source box`);
+  const edgeAlpha = c => { const d = c.getContext('2d', { willReadFrequently: true }).getImageData(100, 41, 1, 3).data; return (d[3] + d[7] + d[11]) / 3; };
+  chk('the blurred box loses its hard edge', edgeAlpha(adj) < edgeAlpha(plain) - 20, `edge α adj=${edgeAlpha(adj).toFixed(0)} plain=${edgeAlpha(plain).toFixed(0)}`);
+  const adjOnly = await grab(r, [{ id: 'adj', type: 'shape', visible: true, opacity: 1, blend: 'normal', adjustment: true,
+    resolved: { position: [100, 60], scale: [1, 1], rotation: 0 }, effects: [{ id: 'gaussianBlur', enabled: true, params: { radius: 6 } }] }]);
+  eq('an adjustment layer with nothing below contributes no pixels', regionInk(adjOnly, 0, 0, W, H), 0, `ink=${regionInk(adjOnly, 0, 0, W, H)}`);
+  r.destroy();
+
+  // transitions: cross fades, wipe reveals half the frame at 50%
+  r = await attach();
+  const tr = (type, side) => ({ [side]: { type, duration: 1 } });
+  const full = await grab(r, [bar('a', 60, { in: 0, out: 4 })], 2);
+  const halfCross = await grab(r, [bar('a', 60, { in: 0, out: 4, transition: tr('cross', 'in') })], 0.5);
+  const gF = full.getContext('2d', { willReadFrequently: true }).getImageData(95, 58, 10, 4).data;
+  const gC = halfCross.getContext('2d', { willReadFrequently: true }).getImageData(95, 58, 10, 4).data;
+  const lum = d => { let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] * d[i + 3] / 255; return s / (d.length / 4); };
+  near('cross dissolve sits near 50% at the midpoint', lum(gC) / Math.max(1, lum(gF)), 0.5, 0.14, `ratio=${(lum(gC) / Math.max(1, lum(gF))).toFixed(2)}`);
+  const halfWipe = await grab(r, [bar('a', 60, { in: 0, out: 4, transition: tr('wipeL', 'in') })], 0.5);
+  const wl = regionInk(halfWipe, 40, 40, 60, 40), wr = regionInk(halfWipe, 100, 40, 60, 40);
+  chk('wipe left-to-right reveals the left half first', wl > 500 && wr < 50, `left=${wl} right=${wr}`);
+  const slide = await grab(r, [bar('a', 60, { in: 0, out: 4, transition: tr('slideL', 'in') })], 0.5);
+  const sl = regionInk(slide, 0, 40, 100, 40), sr = regionInk(slide, 100, 40, 100, 40);
+  chk('slide-in starts off to the left of its resting place', sl > sr, `left=${sl} right=${sr}`);
+  r.destroy();
+
+  // time remap: content clock runs at the layer's rate
+  r = await attach();
+  const noise = (spd, t) => ({ id: 'n', type: 'shape', visible: true, opacity: 1, blend: 'normal', width: W, height: H, speed: spd, in: 0, out: 8,
+    resolved: { position: [100, 60], scale: [1, 1], rotation: 0, width: W, height: H, shape: { type: 'noise', size: 9, speed: 6, seed: 3 }, style: { fill: '#ffffff', fillOpacity: 1 } }, effects: [] });
+  const fast = await grab(r, [noise(2, 0)], 1);
+  const slow = await grab(r, [noise(1, 0)], 2);
+  const dF = fast.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  const dS = slow.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  let diff = 0; for (let i = 0; i < dF.length; i += 4) diff += Math.abs(dF[i] - dS[i]);
+  chk('speed ×2 at t=1 shows the same source frame as ×1 at t=2', diff === 0, `meanAbs=${(diff / (dF.length / 4)).toFixed(2)}`);
+  const rev = await grab(r, [noise(-1, 0)], 0);
+  chk('reverse rate still renders (content clock runs backwards)', regionInk(rev, 0, 0, W, H) > 100, `ink=${regionInk(rev, 0, 0, W, H)}`);
+  r.destroy();
+
+  // the same semantics on the GL backend a real browser picks
+  const rg = new Renderer();
+  const okgl = await rg.attach(mkCanvas(W, H), { preferred: 'webgl2', width: W, height: H, dpr: 1 }).then(() => true).catch(() => false);
+  if (okgl && rg.backend !== 'canvas2d') {
+    const grabG = async (layers, t = 0) => { rg.renderFrame(scene(layers), t, registry); const rb = rg.readback(); const c = mkCanvas(W, H); c.getContext('2d').drawImage(rb.canvas, 0, 0); return c; };
+    const gPlain = await grabG([bar('a', 60)]);
+    const gAdj = await grabG([bar('a', 60), { id: 'adj', type: 'shape', visible: true, opacity: 1, blend: 'normal', adjustment: true,
+      resolved: { position: [100, 60], scale: [1, 1], rotation: 0 }, effects: [{ id: 'gaussianBlur', enabled: true, params: { radius: 6, quality: 9 } }] }]);
+    const haloG = regionInk(gAdj, 30, 30, 140, 60) - regionInk(gPlain, 30, 30, 140, 60);
+    chk('gl2: adjustment layer grades the composite below', haloG > 150, `halo=${haloG}`);
+    const gWipe = await grabG([bar('a', 60, { in: 0, out: 4, transition: { in: { type: 'wipeL', duration: 1 } } })], 0.5);
+    const wlG = regionInk(gWipe, 40, 40, 60, 40), wrG = regionInk(gWipe, 100, 40, 60, 40);
+    chk('gl2: wipe transition clips in comp space', wlG > 500 && wrG < 50, `left=${wlG} right=${wrG}`);
+    const gCross = await grabG([bar('a', 60, { in: 0, out: 4, transition: { in: { type: 'cross', duration: 1 } } })], 0.5);
+    const aMid = (() => { const d = gCross.getContext('2d', { willReadFrequently: true }).getImageData(95, 58, 10, 4).data; return (d[3] + d[43] + d[83] + d[123]) / 4; })();
+    chk('gl2: cross dissolve lands near half alpha at the midpoint', aMid > 90 && aMid < 190, `α=${aMid.toFixed(0)}`);
+  } else {
+    info('gl2 adjustment/transition parity skipped — no WebGL2 in this environment');
+  }
+  rg.destroy?.();
 }
 
 /* ═══ summary ══ */

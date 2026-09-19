@@ -226,15 +226,16 @@ export class Canvas2DCompositor extends Compositor {
     ctx.restore();
   }
 
-  drawLayer(handle, { matrix, opacity = 1, blend = 'normal' } = {}) {
+  drawLayer(handle, { matrix, opacity = 1, blend = 'normal', scissor = null } = {}) {
     const ctx = this.ctx;
     if (!ctx || !handle || opacity <= 0.0015) return;
     const [a, b, c, d, e, f] = matrix || [1, 0, 0, 1, 0, 0];
 
-    if (PIXEL_BLENDS[blend] || PIXEL_BLENDS_VEC[blend]) { this._pixelBlend(handle, matrix, opacity, blend); return; }
+    if (PIXEL_BLENDS[blend] || PIXEL_BLENDS_VEC[blend]) { this._pixelBlend(handle, matrix, opacity, blend, scissor); return; }
 
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    if (scissor) { ctx.beginPath(); ctx.rect(scissor[0], scissor[1], scissor[2], scissor[3]); ctx.clip(); }
     ctx.transform(a, b, c, d, e, f);
     ctx.globalAlpha = clamp(opacity, 0, 1);
     ctx.globalCompositeOperation = NATIVE_GCO[blend] || 'source-over';
@@ -244,8 +245,27 @@ export class Canvas2DCompositor extends Compositor {
     this.stats.draws++;
   }
 
+  /** Freeze everything drawn so far as an effect-chain source (adjustment layers). */
+  snapshotComp() {
+    const cv = document.createElement('canvas');
+    cv.width = this.pixelWidth; cv.height = this.pixelHeight;
+    const g = cv.getContext('2d');
+    g.drawImage(this.canvas, 0, 0);
+    return { canvas: cv, w: this.pixelWidth, h: this.pixelHeight, _flip: 0 };
+  }
+
+  /** Replace the comp buffer with an effect-chain result (adjustment layers). */
+  presentComp(handle) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.pixelWidth, this.pixelHeight);
+    ctx.drawImage(handle.canvas, 0, 0);
+    ctx.restore();
+  }
+
   /** Exact W3C blend for the four modes Canvas2D cannot express natively. */
-  _pixelBlend(handle, matrix, opacity, blend) {
+  _pixelBlend(handle, matrix, opacity, blend, scissor = null) {
     const ctx = this.ctx;
     const W = this.pixelWidth, H = this.pixelHeight;
     const scalar = PIXEL_BLENDS[blend];

@@ -6,7 +6,7 @@
  * renderer, which keeps the panels testable and means there is exactly one
  * place where the document can change.
  */
-import { iconEl } from './icons.js';
+import { iconEl, iconSVG } from './icons.js';
 import { $, $$, el, clamp, round } from '../core/base.js';
 import { EFFECT_LIST, CATEGORIES, defaultParams } from '../effects/registry.js';
 import { SHAPE_TYPES } from '../render/shapes.js';
@@ -29,7 +29,8 @@ function numField(label, value, api, opts = {}) {
     const diamond = el('button', {
       class: 'kf' + (keyed ? ' on' : ''),
       title: keyed ? 'Remove keyframe at playhead' : 'Add keyframe at playhead',
-    }, '◆');
+    });
+    diamond.innerHTML = iconSVG('key', 10);
     diamond.addEventListener('click', () => api.toggleKey(path));
     row.append(diamond);
   }
@@ -118,6 +119,25 @@ function sliderField(label, value, api, path, min, max, step) {
   });
   row.append(d, range, out);
   return row;
+}
+
+const TRANS_TYPES = [
+  { value: '', label: 'none' }, { value: 'cross', label: 'cross dissolve' },
+  { value: 'wipeL', label: 'wipe left-to-right' }, { value: 'wipeR', label: 'wipe right-to-left' },
+  { value: 'slideL', label: 'slide from left' }, { value: 'slideR', label: 'slide from right' },
+];
+
+/** Icon-grid picker for the shape kind — every cell is one SVG from icons.js. */
+function shapeGrid(L, api) {
+  const cur = L.shape?.type || 'rect';
+  const grid = el('div', { class: 'shape-grid' });
+  for (const t of SHAPE_TYPES) {
+    const b = el('button', { class: 'sg-cell' + (t.id === cur ? ' on' : ''), title: t.name });
+    b.innerHTML = iconSVG(t.icon, 17);
+    b.addEventListener('click', () => api.setShapeType(t.id));
+    grid.append(b);
+  }
+  return grid;
 }
 
 function section(title, ...kids) {
@@ -229,8 +249,8 @@ export function renderEffectsList(state, api) {
   }
   if (!byCat.size) { host.append(el('div', { class: 'empty' }, `No effect matches “${state.fxQuery}”.`)); return; }
   for (const [catId, list] of byCat) {
-    const cat = CATEGORIES[catId] || { name: catId, icon: '•' };
-    const head = el('div', { class: 'fx-cat' }, `${cat.icon}  ${cat.name}`);
+    const cat = CATEGORIES[catId] || { name: catId, icon: 'catStylize' };
+    const head = el('div', { class: 'fx-cat' }, iconEl(cat.icon, '', 12), el('span', {}, cat.name), el('span', { class: 'fx-count' }, String(list.length)));
     host.append(head);
     for (const fx of list) {
       const row = el('div', { class: 'fx-row', title: `${fx.id} · cost ${fx.cost || 'low'}${fx.glsl ? '' : ' · CPU path'}` });
@@ -257,7 +277,7 @@ export function renderFonts(state, api) {
   for (const family of reg.families()) {
     const spec = reg.spec(family) || {};
     const row = el('div', { class: 'fo-row' });
-    const sample = el('div', { class: 'fo-sample' }, spec.sample || 'Handgloves ۱۲۳');
+    const sample = el('div', { class: 'fo-sample' }, spec.sample || 'Handgloves 123');
     sample.style.fontFamily = `"${family}", sans-serif`;
     if (spec.defaultAxes) sample.style.fontVariationSettings = Object.entries(spec.defaultAxes).map(([k, v]) => `'${k}' ${v}`).join(', ');
     const meta = el('div', { class: 'fo-meta' });
@@ -285,6 +305,20 @@ export function renderInspector(state, api) {
   const host = $('#inspector');
   host.textContent = '';
   const L = selectedLayer(state);
+  const mk = (state.project.markers || []).find(m => m.id === state.markerSel);
+  if (mk) {
+    host.append(section('Marker',
+      row2(
+        el('input', { class: 'f-txt', value: mk.label || '', placeholder: 'label', oninput: e => api.setMarker(mk.id, { label: e.target.value }) }),
+        el('input', { type: 'color', class: 'f-col', value: mk.color || '#00e5a0', oninput: e => api.setMarker(mk.id, { color: e.target.value }) }),
+      ),
+      numField('Time (s)', mk.t, null, { step: 0.1, min: 0, onInput: v => api.setMarker(mk.id, { t: v }) }),
+      row2(
+        el('button', { class: 'btn-sm', onclick: () => api.seek(mk.t) }, iconEl('markerNext', '', 12), ' Go'),
+        el('button', { class: 'btn-sm danger', onclick: () => api.deleteMarker(mk.id) }, iconEl('markerDel', '', 12), ' Delete'),
+      ),
+    ));
+  }
   if (!L) { host.append(el('div', { class: 'empty' }, 'Select a layer to inspect it.')); return; }
 
   host.append(el('div', { class: 'ins-head' },
@@ -314,9 +348,22 @@ export function renderInspector(state, api) {
     ),
   ));
 
+  host.append(section('Time & Compositing',
+    row2(
+      el('button', { class: 'btn-sm' + (L.adjustment ? ' on' : ''), onclick: () => api.toggleAdjustment() }, iconEl('adjustment', '', 12), ' Adjustment'),
+      el('button', { class: 'btn-sm', onclick: () => api.setSpeed(-(L.speed ?? 1)) }, iconEl('reverse', '', 12), ' Reverse'),
+    ),
+    numField('Speed ×', L.speed ?? 1, null, { step: 0.05, min: -8, max: 8, onInput: v => api.setSpeed(v) }),
+    el('div', { class: 'note dim' }, 'Content clock: media frames, noise fields and text animators. Keys stay on comp time.'),
+    selectField('In transition', L.transition?.in?.type || '', TRANS_TYPES, v => api.setTransition('in', v, L.transition?.in?.duration ?? 0.5)),
+    numField('In duration (s)', L.transition?.in?.duration ?? 0.5, null, { step: 0.05, min: 0.04, max: 5, onInput: v => L.transition?.in && api.setTransition('in', L.transition.in.type, v) }),
+    selectField('Out transition', L.transition?.out?.type || '', TRANS_TYPES, v => api.setTransition('out', v, L.transition?.out?.duration ?? 0.5)),
+    numField('Out duration (s)', L.transition?.out?.duration ?? 0.5, null, { step: 0.05, min: 0.04, max: 5, onInput: v => L.transition?.out && api.setTransition('out', L.transition.out.type, v) }),
+  ));
+
   if (L.type === 'shape') {
     host.append(section('Shape',
-      selectField('Type', L.shape?.type || 'rect', SHAPE_TYPES.map(s => ({ value: s.id, label: `${s.icon} ${s.name}` })), v => api.setShapeType(v)),
+      shapeGrid(L, api),
       numField('Width', L.width, null, { step: 1, min: 1, onInput: v => api.setLayer('width', Math.round(v)) }),
       numField('Height', L.height, null, { step: 1, min: 1, onInput: v => api.setLayer('height', Math.round(v)) }),
       colorField('Fill', L.style?.fill, v => api.setStyle('fill', v)),
@@ -519,6 +566,16 @@ export function renderTypePanel(state, api) {
     numField('Tracking', t.tracking ?? 0, null, { step: 0.1, onInput: v => api.setText('tracking', v) }),
     numField('Leading', t.leading ?? 1.2, null, { step: 0.05, min: 0.4, onInput: v => api.setText('leading', v) }),
     colorField('Colour', t.color, v => api.setText('color', v)),
+  ));
+
+  // Display styles: the kinetic-type looks the reference pieces need
+  // (3D extrude like broadcast titles, marker-pen highlight like docs zooms).
+  host.append(section('Display',
+    numField('Extrude depth', t.extrude?.depth ?? 0, null, { step: 1, min: 0, max: 60, onInput: v => api.setText('extrude', { ...t.extrude, depth: v }) }),
+    numField('Extrude angle', t.extrude?.angle ?? 90, null, { step: 1, min: -180, max: 180, onInput: v => api.setText('extrude', { ...t.extrude, angle: v }) }),
+    colorField('Extrude colour', t.extrude?.color || '#000000', v => api.setText('extrude', { ...t.extrude, color: v })),
+    textField('Highlight phrase', t.highlight?.phrase || '', v => api.setText('highlight', { ...t.highlight, phrase: v })),
+    colorField('Highlight colour', t.highlight?.color || '#ffe14d', v => api.setText('highlight', { ...t.highlight, color: v })),
   ));
 
   // Coverage report — the thing After Effects never tells you.

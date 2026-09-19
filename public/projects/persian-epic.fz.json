@@ -1,0 +1,950 @@
+{
+  "format": "framezero",
+  "version": 1,
+  "name": "persian-epic",
+  "comp": {
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "duration": 30,
+    "background": "#0c0c0c"
+  },
+  "assets": [
+    {
+      "id": "ap1",
+      "kind": "image",
+      "name": "plate-couple.jpg",
+      "src": "assets/plate-couple.jpg"
+    },
+    {
+      "id": "ap2",
+      "kind": "image",
+      "name": "plate-herald.jpg",
+      "src": "assets/plate-herald.jpg"
+    },
+    {
+      "id": "ap3",
+      "kind": "image",
+      "name": "plate-king.jpg",
+      "src": "assets/plate-king.jpg"
+    },
+    {
+      "id": "ap4",
+      "kind": "image",
+      "name": "painting-esther.jpg",
+      "src": "assets/painting-esther.jpg"
+    },
+    {
+      "id": "ab1",
+      "kind": "image",
+      "name": "brush-1.png",
+      "src": "assets/brush-1.png"
+    },
+    {
+      "id": "am1",
+      "kind": "audio",
+      "name": "Dramatic (PeriTune, CC-BY)",
+      "src": "assets/music-epic.ogg"
+    }
+  ],
+  "layers": [
+    {
+      "id": "music",
+      "type": "media",
+      "name": "Score — Dramatic",
+      "mediaKind": "audio",
+      "assetId": "am1",
+      "inPoint": 0,
+      "outPoint": 30,
+      "volume": 0.85,
+      "mute": false,
+      "transform": {
+        "position": [
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1
+        ],
+        "rotation": 0
+      }
+    },
+    {
+      "id": "bg",
+      "type": "shape",
+      "name": "Background",
+      "inPoint": 0,
+      "outPoint": 30,
+      "width": 1280,
+      "height": 720,
+      "transform": {
+        "position": [
+          640,
+          360
+        ],
+        "scale": [
+          1,
+          1
+        ],
+        "rotation": 0
+      },
+      "shape": {
+        "type": "solid"
+      },
+      "style": {
+        "fill": "#0c0c0c",
+        "fillOpacity": 1
+      }
+    },
+    {
+      "id": "couple",
+      "type": "media",
+      "name": "Plate — king & queen",
+      "mediaKind": "image",
+      "assetId": "ap1",
+      "inPoint": 0,
+      "outPoint": 6.5,
+      "transform": {
+        "position": {
+          "keys": [
+            {
+              "t": 0,
+              "v": [
+                620,
+                352
+              ],
+              "ease": "ease-in-out-cubic"
+            },
+            {
+              "t": 6.5,
+              "v": [
+                668,
+                368
+              ]
+            }
+          ]
+        },
+        "scale": {
+          "keys": [
+            {
+              "t": 0,
+              "v": [
+                0.72,
+                0.72
+              ],
+              "ease": "ease-in-out-cubic"
+            },
+            {
+              "t": 6.5,
+              "v": [
+                0.8,
+                0.8
+              ]
+            }
+          ]
+        },
+        "rotation": 0
+      },
+      "effects": [
+        {
+          "id": "colorCorrect",
+          "enabled": true,
+          "params": {
+            "brightness": 0.02,
+            "contrast": 0.05,
+            "saturation": 1.06,
+            "gamma": 1,
+            "temperature": 0.06,
+            "tint": 0
+          }
+        },
+        {
+          "id": "vignette",
+          "enabled": true,
+          "params": {
+            "amount": 0.6,
+            "radius": 0.85,
+            "softness": 0.6,
+            "color": "#000000"
+          }
+        },
+        {
+          "id": "halftone",
+          "enabled": true,
+          "params": {
+            "cell": 12,
+            "angle": 0,
+            "ink": "#0b0d10",
+            "mix": 0.35,
+            "modulation": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "herald",
+      "type": "media",
+      "name": "Plate — herald",
+      "mediaKind": "image",
+      "assetId": "ap2",
+      "inPoint": 6,
+      "outPoint": 12.5,
+      "transform": {
+        "position": {
+          "keys": [
+            {
+              "t": 6,
+              "v": [
+                585,
+                375
+              ],
+              "ease": "ease-in-out-cubic"
+            },
+            {
+              "t": 12.5,
+              "v": [
+                525,
+                350
+              ]
+            }
+          ]
+        },
+        "scale": {
+          "keys": [
+            {
+              "t": 6,
+              "v": [
+                0.74,
+                0.74
+              ],
+              "ease": "ease-in-out-cubic"
+            },
+            {
+              "t": 12.5,
+              "v": [
+                0.84,
+                0.84
+              ]
+            }
+          ]
+        },
+        "rotation": 0
+      },
+      "effects": [
+        {
+          "id": "vignette",
+          "enabled": true,
+          "params": {
+            "amount": 0.65,
+            "radius": 0.82,
+            "softness": 0.6,
+            "color": "#000000"
+          }
+        },
+        {
+          "id": "halftone",
+          "enabled": true,
+          "params": {
+            "cell": 12,
+            "angle": 0,
+            "ink": "#0b0d10",
+            "mix": 0.35,
+            "modulation": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "title-herald",
+      "type": "text",
+      "name": "Title — herald",
+      "inPoint": 7.5,
+      "outPoint": 12.5,
+      "transform": {
+        "position": [
+          830,
+          430
+        ],
+        "scale": {
+          "keys": [
+            {
+              "t": 7.5,
+              "v": [
+                1.08,
+                1.08
+              ],
+              "ease": "ease-out-cubic"
+            },
+            {
+              "t": 12,
+              "v": [
+                1,
+                1
+              ]
+            }
+          ]
+        },
+        "rotation": 0
+      },
+      "text": {
+        "text": "غریب از پارس",
+        "family": "Vazirmatn",
+        "size": 168,
+        "weight": 800,
+        "leading": 1.25,
+        "direction": "rtl",
+        "color": "#ffd21f",
+        "anchor": "center",
+        "vAnchor": "baseline",
+        "extrude": {
+          "depth": 18,
+          "angle": 90,
+          "color": "#6b4d00"
+        }
+      },
+      "effects": [
+        {
+          "id": "bloom",
+          "enabled": true,
+          "params": {
+            "threshold": 0.5,
+            "intensity": 0.7,
+            "radius": 26,
+            "softness": 0.55
+          }
+        }
+      ]
+    },
+    {
+      "id": "paper",
+      "type": "shape",
+      "name": "Grunge paper",
+      "inPoint": 12,
+      "outPoint": 20,
+      "width": 1280,
+      "height": 720,
+      "transform": {
+        "position": [
+          640,
+          360
+        ],
+        "scale": [
+          1,
+          1
+        ],
+        "rotation": 0
+      },
+      "shape": {
+        "type": "solid"
+      },
+      "style": {
+        "fill": "#d9d5cc",
+        "fillOpacity": 1
+      },
+      "effects": [
+        {
+          "id": "grain",
+          "enabled": true,
+          "params": {
+            "amount": 0.16,
+            "size": 2.2,
+            "speed": 6,
+            "luminance": 0.5
+          }
+        },
+        {
+          "id": "vignette",
+          "enabled": true,
+          "params": {
+            "amount": 0.5,
+            "radius": 0.9,
+            "softness": 0.7,
+            "color": "#5a564c"
+          }
+        }
+      ]
+    },
+    {
+      "id": "brush-matte",
+      "type": "media",
+      "name": "Ink reveal (matte)",
+      "mediaKind": "image",
+      "assetId": "ab1",
+      "inPoint": 12,
+      "outPoint": 20,
+      "transform": {
+        "position": [
+          640,
+          360
+        ],
+        "scale": {
+          "keys": [
+            {
+              "t": 12,
+              "v": [
+                0.5,
+                0.5
+              ],
+              "ease": "ease-out-cubic"
+            },
+            {
+              "t": 16.5,
+              "v": [
+                1.35,
+                1.35
+              ]
+            }
+          ]
+        },
+        "rotation": 0
+      }
+    },
+    {
+      "id": "king",
+      "type": "media",
+      "name": "King through ink",
+      "mediaKind": "image",
+      "assetId": "ap3",
+      "inPoint": 12,
+      "outPoint": 20,
+      "transform": {
+        "position": [
+          760,
+          360
+        ],
+        "scale": {
+          "keys": [
+            {
+              "t": 12,
+              "v": [
+                0.8,
+                0.8
+              ],
+              "ease": "ease-in-out-cubic"
+            },
+            {
+              "t": 20,
+              "v": [
+                0.88,
+                0.88
+              ]
+            }
+          ]
+        },
+        "rotation": 0
+      },
+      "matte": {
+        "source": "brush-matte",
+        "mode": "alpha",
+        "invert": false
+      },
+      "effects": [
+        {
+          "id": "colorCorrect",
+          "enabled": true,
+          "params": {
+            "brightness": 0,
+            "contrast": 0.1,
+            "saturation": 0.35,
+            "gamma": 1,
+            "temperature": 0,
+            "tint": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "w4",
+      "type": "text",
+      "name": "Word — pars",
+      "inPoint": 15.2,
+      "outPoint": 20,
+      "transform": {
+        "position": {
+          "keys": [
+            {
+              "t": 15.2,
+              "v": [
+                1030,
+                424
+              ]
+            },
+            {
+              "t": 20,
+              "v": [
+                1016,
+                438
+              ]
+            }
+          ]
+        },
+        "scale": [
+          1,
+          1
+        ],
+        "rotation": -10
+      },
+      "text": {
+        "text": "پارس",
+        "family": "Vazirmatn",
+        "size": 82,
+        "weight": 800,
+        "direction": "rtl",
+        "color": "#ffe14d",
+        "anchor": "center"
+      },
+      "effects": [
+        {
+          "id": "bloom",
+          "enabled": true,
+          "params": {
+            "threshold": 0.5,
+            "intensity": 0.8,
+            "radius": 20,
+            "softness": 0.6
+          }
+        }
+      ]
+    },
+    {
+      "id": "w3",
+      "type": "text",
+      "name": "Word — man",
+      "inPoint": 14.8,
+      "outPoint": 20,
+      "transform": {
+        "position": {
+          "keys": [
+            {
+              "t": 14.8,
+              "v": [
+                846,
+                342
+              ]
+            },
+            {
+              "t": 20,
+              "v": [
+                856,
+                330
+              ]
+            }
+          ]
+        },
+        "scale": [
+          1,
+          1
+        ],
+        "rotation": 4
+      },
+      "text": {
+        "text": "مرد",
+        "family": "Vazirmatn",
+        "size": 82,
+        "weight": 800,
+        "direction": "rtl",
+        "color": "#ffe14d",
+        "anchor": "center"
+      },
+      "effects": [
+        {
+          "id": "bloom",
+          "enabled": true,
+          "params": {
+            "threshold": 0.5,
+            "intensity": 0.8,
+            "radius": 20,
+            "softness": 0.6
+          }
+        }
+      ]
+    },
+    {
+      "id": "w2",
+      "type": "text",
+      "name": "Word — night",
+      "inPoint": 14.4,
+      "outPoint": 20,
+      "transform": {
+        "position": {
+          "keys": [
+            {
+              "t": 14.4,
+              "v": [
+                1002,
+                252
+              ]
+            },
+            {
+              "t": 20,
+              "v": [
+                990,
+                266
+              ]
+            }
+          ]
+        },
+        "scale": [
+          1,
+          1
+        ],
+        "rotation": -6
+      },
+      "text": {
+        "text": "شب",
+        "family": "Vazirmatn",
+        "size": 82,
+        "weight": 800,
+        "direction": "rtl",
+        "color": "#ffe14d",
+        "anchor": "center"
+      },
+      "effects": [
+        {
+          "id": "bloom",
+          "enabled": true,
+          "params": {
+            "threshold": 0.5,
+            "intensity": 0.8,
+            "radius": 20,
+            "softness": 0.6
+          }
+        }
+      ]
+    },
+    {
+      "id": "w1",
+      "type": "text",
+      "name": "Word — man",
+      "inPoint": 14,
+      "outPoint": 20,
+      "transform": {
+        "position": {
+          "keys": [
+            {
+              "t": 14,
+              "v": [
+                872,
+                168
+              ]
+            },
+            {
+              "t": 20,
+              "v": [
+                884,
+                182
+              ]
+            }
+          ]
+        },
+        "scale": [
+          1,
+          1
+        ],
+        "rotation": 8
+      },
+      "text": {
+        "text": "من",
+        "family": "Vazirmatn",
+        "size": 82,
+        "weight": 800,
+        "direction": "rtl",
+        "color": "#ffe14d",
+        "anchor": "center"
+      },
+      "effects": [
+        {
+          "id": "bloom",
+          "enabled": true,
+          "params": {
+            "threshold": 0.5,
+            "intensity": 0.8,
+            "radius": 20,
+            "softness": 0.6
+          }
+        }
+      ]
+    },
+    {
+      "id": "title-wave",
+      "type": "text",
+      "name": "Rotated title",
+      "inPoint": 14,
+      "outPoint": 20,
+      "transform": {
+        "position": [
+          400,
+          430
+        ],
+        "scale": [
+          1,
+          1
+        ],
+        "rotation": -18
+      },
+      "text": {
+        "text": "موج خلیج فارس",
+        "family": "Vazirmatn",
+        "size": 104,
+        "weight": 800,
+        "leading": 1.3,
+        "direction": "rtl",
+        "color": "#ffe14d",
+        "anchor": "center",
+        "vAnchor": "baseline",
+        "extrude": {
+          "depth": 10,
+          "angle": 115,
+          "color": "#4a3a00"
+        }
+      },
+      "effects": [
+        {
+          "id": "bloom",
+          "enabled": true,
+          "params": {
+            "threshold": 0.5,
+            "intensity": 0.85,
+            "radius": 26,
+            "softness": 0.6
+          }
+        }
+      ]
+    },
+    {
+      "id": "esther",
+      "type": "media",
+      "name": "Painting — banquet",
+      "mediaKind": "image",
+      "assetId": "ap4",
+      "inPoint": 20,
+      "outPoint": 26,
+      "transform": {
+        "position": {
+          "keys": [
+            {
+              "t": 20,
+              "v": [
+                620,
+                400
+              ],
+              "ease": "ease-in-out-cubic"
+            },
+            {
+              "t": 26,
+              "v": [
+                700,
+                350
+              ]
+            }
+          ]
+        },
+        "scale": {
+          "keys": [
+            {
+              "t": 20,
+              "v": [
+                0.78,
+                0.78
+              ],
+              "ease": "ease-in-out-cubic"
+            },
+            {
+              "t": 26,
+              "v": [
+                0.88,
+                0.88
+              ]
+            }
+          ]
+        },
+        "rotation": 0
+      },
+      "effects": [
+        {
+          "id": "colorCorrect",
+          "enabled": true,
+          "params": {
+            "brightness": 0,
+            "contrast": 0.06,
+            "saturation": 0.92,
+            "gamma": 1,
+            "temperature": 0.04,
+            "tint": 0
+          }
+        },
+        {
+          "id": "vignette",
+          "enabled": true,
+          "params": {
+            "amount": 0.7,
+            "radius": 0.8,
+            "softness": 0.6,
+            "color": "#000000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "title-cyrus",
+      "type": "text",
+      "name": "Title — Cyrus",
+      "inPoint": 21,
+      "outPoint": 26,
+      "transform": {
+        "position": {
+          "keys": [
+            {
+              "t": 21,
+              "v": [
+                640,
+                610
+              ],
+              "ease": "ease-out-cubic"
+            },
+            {
+              "t": 25.5,
+              "v": [
+                640,
+                566
+              ]
+            }
+          ]
+        },
+        "scale": {
+          "keys": [
+            {
+              "t": 21,
+              "v": [
+                0.94,
+                0.94
+              ],
+              "ease": "ease-out-cubic"
+            },
+            {
+              "t": 25,
+              "v": [
+                1,
+                1
+              ]
+            }
+          ]
+        },
+        "rotation": 0
+      },
+      "text": {
+        "text": "کوروش بزرگ",
+        "family": "Vazirmatn",
+        "size": 150,
+        "weight": 800,
+        "leading": 1.3,
+        "direction": "rtl",
+        "color": "#ffd21f",
+        "anchor": "center",
+        "vAnchor": "baseline",
+        "extrude": {
+          "depth": 16,
+          "angle": 90,
+          "color": "#5c4300"
+        }
+      },
+      "effects": [
+        {
+          "id": "bloom",
+          "enabled": true,
+          "params": {
+            "threshold": 0.5,
+            "intensity": 0.75,
+            "radius": 24,
+            "softness": 0.55
+          }
+        }
+      ]
+    },
+    {
+      "id": "page",
+      "type": "shape",
+      "name": "Paper page",
+      "inPoint": 26,
+      "outPoint": 30,
+      "width": 1280,
+      "height": 720,
+      "transform": {
+        "position": [
+          640,
+          360
+        ],
+        "scale": [
+          1,
+          1
+        ],
+        "rotation": 0
+      },
+      "shape": {
+        "type": "solid"
+      },
+      "style": {
+        "fill": "#f2f0ea",
+        "fillOpacity": 1
+      }
+    },
+    {
+      "id": "doc-text",
+      "type": "text",
+      "name": "Document zoom",
+      "inPoint": 26,
+      "outPoint": 30,
+      "transform": {
+        "position": [
+          664,
+          353
+        ],
+        "scale": [
+          1,
+          1
+        ],
+        "rotation": 0
+      },
+      "text": {
+        "text": "The royal visual statements of authority and\ndivine right of kings through art. The image of\nCyrus the Great has roots in justice and\ntolerance. They are not decorative; they are\npolitical symbols of legacy and permanence\nof monarchy.",
+        "family": "Source Serif 4",
+        "size": 46,
+        "weight": 420,
+        "leading": 1.62,
+        "align": "left",
+        "maxWidth": 960,
+        "direction": "ltr",
+        "color": "#2c2c2c",
+        "anchor": "left",
+        "vAnchor": "top",
+        "highlight": {
+          "phrase": "Cyrus the Great",
+          "color": "#ffe14d"
+        }
+      },
+      "effects": [
+        {
+          "id": "gaussianBlur",
+          "enabled": true,
+          "params": {
+            "radius": {
+              "keys": [
+                {
+                  "t": 26,
+                  "v": 15,
+                  "ease": "ease-out-cubic"
+                },
+                {
+                  "t": 29.2,
+                  "v": 0
+                }
+              ]
+            },
+            "quality": 13
+          }
+        }
+      ]
+    }
+  ]
+}

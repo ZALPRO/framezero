@@ -44,6 +44,9 @@ export function createProject(over = {}) {
     comp: createComp(over.comp),
     layers: [],
     assets: [],
+    /* Comp markers (AE/Premiere): { id, t, color, label } — navigation and
+       annotation only, they never render into the frame. */
+    markers: [],
     ...over,
     id: over.id || uid('prj'),
   };
@@ -82,6 +85,18 @@ export function createLayer(type, over = {}) {
     /* Track matte: consume another layer's alpha or luma as this layer's
        window. The source layer is hidden from the comp (matteOnly). */
     matte: null,
+    /* Adjustment layer (AE semantics): draws nothing of its own — its effect
+       chain runs on the accumulated composite of everything below it. */
+    adjustment: false,
+    /* Time remap rate (AE Layer > Time > Time-Stretch / Premiere Rate Stretch).
+       1 = natural; 2 = double speed; negative plays the source backwards.
+       Transform and effect keys stay on comp time; the layer's CONTENT
+       (media frames, noise fields, text animators) reads remapped time. */
+    speed: 1,
+    /* Boundary transitions (Premiere): applied at the layer's in/out edges.
+       { in: {type, duration}, out: {type, duration} } — type is one of
+       'cross' | 'wipeL' | 'wipeR' | 'slideL' | 'slideR'. */
+    transition: null,
   };
   if (type === 'media') {
     // audio mix lives on the layer so it serialises with the project
@@ -92,8 +107,10 @@ export function createLayer(type, over = {}) {
   if (type === 'text') {
     base.text = { ...DEFAULT_TEXT, ...(over.text || {}) };
   } else if (type === 'media') {
-    base.width = over.width ?? 640;
-    base.height = over.height ?? 360;
+    // null = "use the source's natural size" (resolved at raster time);
+    // a number only appears here if the author explicitly boxed the media
+    base.width = over.width ?? null;
+    base.height = over.height ?? null;
   } else {
     const shapeType = over.shapeType || (type === 'shape' ? 'rect' : 'solid');
     base.width = over.width ?? 640;
@@ -204,11 +221,26 @@ export function resolveLayer(layer, time, comp) {
       rotation: Number(resolveProp(t.rotation, time) ?? 0),
       anchorPoint: t.anchorPoint ? resolveVec(t.anchorPoint, time, null) : null,
     },
-    effects: (layer.effects || []).filter(e => e && EFFECTS[e.id]).map(e => ({
-      id: e.id, enabled: e.enabled !== false, params: e.params || {},
-    })),
+    effects: (layer.effects || []).filter(e => e && EFFECTS[e.id]).map(e => {
+      // every numeric param may carry keys — that is how the focus-pull
+      // blur ramp in the demo piece works
+      const params = {};
+      for (const [k, v] of Object.entries(e.params || {})) { const r = resolveProp(v, time); params[k] = r === undefined ? v : r; }
+      return { id: e.id, enabled: e.enabled !== false, params };
+    }),
     masks: resolveMasks(layer.masks, time),
   };
+  if (layer.adjustment) out.adjustment = true;
+  const spd = Number(layer.speed);
+  if (Number.isFinite(spd) && spd !== 1 && spd !== 0) out.speed = spd;
+  if (layer.transition) {
+    const tr = {};
+    for (const side of ['in', 'out']) {
+      const d = layer.transition[side];
+      if (d && d.type && d.duration > 0) tr[side] = { type: d.type, duration: d.duration };
+    }
+    if (tr.in || tr.out) out.transition = tr;
+  }
   if (layer.matte && layer.matte.source) {
     out.matte = {
       id: layer.matte.source,
@@ -246,11 +278,16 @@ export function resolveLayer(layer, time, comp) {
       axes: tx.axes || {},
       anchor: tx.anchor || 'left',
       vAnchor: tx.vAnchor || 'baseline',
+      extrude: tx.extrude, highlight: tx.highlight,
     };
     out.resolved.animators = layer.animators || [];
   } else {
-    out.width = Math.max(1, Math.round(resolveProp(layer.width, time) ?? 640));
-    out.height = Math.max(1, Math.round(resolveProp(layer.height, time) ?? 360));
+    // media without an explicit box keeps null so the rasteriser can use the
+    // source's natural size; shapes always get a concrete box
+    const natW = layer.type === 'media' && layer.width == null;
+    const natH = layer.type === 'media' && layer.height == null;
+    out.width = natW ? null : Math.max(1, Math.round(resolveProp(layer.width, time) ?? 640));
+    out.height = natH ? null : Math.max(1, Math.round(resolveProp(layer.height, time) ?? 360));
     out.resolved.width = out.width;
     out.resolved.height = out.height;
     // shape params may themselves be animated (e.g. noise speed, grid phase)

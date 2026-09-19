@@ -390,7 +390,36 @@ CK('9'); group='9. resolved scene renders (contract proof)'; curTable=null;
   }
 }
 
-/* ═══ summary ═══ */
+
+/* ═══ markers · time remap · adjustment · transitions (model) ═══ */
+{
+  const p = createProject();
+  chk('a new project carries a comp marker list', Array.isArray(p.markers) && p.markers.length === 0, `markers=${JSON.stringify(p.markers)}`);
+
+  const L = createLayer('shape');
+  eq('layers default to natural speed', L.speed, 1);
+  eq('layers are not adjustment layers by default', L.adjustment, false);
+  eq('layers ship without boundary transitions', L.transition, null);
+
+  const comp = createComp({ duration: 10 });
+  L.adjustment = true; L.speed = 2; L.transition = { in: { type: 'cross', duration: 0.5 } };
+  const r1 = resolveLayer(L, 1, comp);
+  eq('resolveLayer forwards the adjustment flag', r1.adjustment, true);
+  eq('resolveLayer forwards the remap rate', r1.speed, 2);
+  eq('resolveLayer forwards a valid transition', r1.transition.in.type, 'cross');
+
+  L.speed = 1; L.transition = { in: { type: 'wipeL', duration: 0 } };
+  const r2 = resolveLayer(L, 1, comp);
+  chk('a rate of 1 resolves to no remap at all', r2.speed === undefined, `speed=${r2.speed}`);
+  chk('a zero-duration transition is dropped, not rendered', r2.transition === undefined, `tr=${JSON.stringify(r2.transition)}`);
+
+  L.adjustment = false; L.speed = 0; L.transition = null;
+  const r3 = resolveLayer(L, 1, comp);
+  chk('a zero rate is ignored rather than freezing time', r3.speed === undefined, `speed=${r3.speed}`);
+  chk('no adjustment flag when off', r3.adjustment === undefined, `adj=${r3.adjustment}`);
+}
+
+/* ═══ summary ══ */
 const passed=results.filter(r=>r.ok===true).length,failed=results.filter(r=>r.ok===false).length,skipped=results.filter(r=>r.ok===null).length;
 sumEl.innerHTML=`<span class="${failed?'fail':'pass'}">${failed?'FAILED':'ALL PASS'}</span> — ${passed} passed, ${failed} failed, ${skipped} info`;
 window.__TESTS__={results,passed,failed,skipped,groups:[...new Set(results.map(r=>r.group))]};

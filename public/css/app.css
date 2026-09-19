@@ -756,3 +756,54 @@ button.l-ic:not(.on) { opacity: .68; }
 /* One keyboard-focus style for the whole chrome (buttons, tabs, tree rows). */
 :focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 button:focus-visible, .tab:focus-visible { border-radius: var(--r); }
+
+/* ─── v1.1 editing surface ───────────────────────────────────────────── */
+
+/* shape-kind icon grid (replaces the old glyph <select>) */
+.shape-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin: 2px 0 8px; }
+.sg-cell { display: inline-flex; align-items: center; justify-content: center; height: 30px;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r);
+  color: var(--txt-2); cursor: pointer; transition: background .12s, color .12s, border-color .12s; }
+.sg-cell:hover { background: var(--bg-hover); color: var(--txt); }
+.sg-cell.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-2)); }
+
+/* effect category headers: svg icon + name + live count */
+.fx-cat { display: flex; align-items: center; gap: 7px; }
+.fx-cat .fx-count { margin-left: auto; font: 600 9px/1 ui-monospace, monospace; color: var(--txt-3);
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 99px; padding: 2px 6px; }
+
+/* timeline toolbar separator + marker cluster */
+.tl-sep { width: 1px; height: 16px; background: var(--line-2); margin-inline: 4px; display: inline-block; }
+
+/* scopes panel */
+#scopes-panel { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+#scopes-panel canvas { width: 100%; border: 1px solid var(--line); border-radius: var(--r); background: #0b0f15; }
+.scope-seg { align-self: stretch; }
+.scope-note { color: var(--txt-3); font-size: 10px; }
+
+/* viewport overlays: safe areas + thirds grid */
+.vp-overlay { position: absolute; inset: 0; pointer-events: none; }
+#vp-safe .safe-action, #vp-safe .safe-title { position: absolute; border: 1px dashed rgb(255 255 255 / .38); border-radius: 2px; }
+#vp-safe .safe-action { inset: 5%; }
+#vp-safe .safe-title { inset: 10%; border-color: rgb(0 229 160 / .5); }
+#vp-grid { background:
+  linear-gradient(to right, rgb(255 255 255 / .22) 1px, transparent 1px) 0 0 / 33.333% 100%,
+  linear-gradient(to bottom, rgb(255 255 255 / .22) 1px, transparent 1px) 0 0 / 100% 33.333%; }
+
+/* inspector micro-states */
+.btn-sm.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.btn-sm.danger { color: #ff8f8f; }
+.btn-sm.danger:hover { background: rgb(255 90 90 / .12); }
+.f-txt { flex: 1; min-width: 0; background: var(--bg-2); border: 1px solid var(--line); color: var(--txt);
+  border-radius: var(--r); padding: 4px 7px; font: 12px/1.3 inherit; }
+.f-txt:focus { outline: 1px solid var(--accent); }
+input[type="color"].f-col { inline-size: 34px; block-size: 24px; padding: 1px; background: var(--bg-2);
+  border: 1px solid var(--line); border-radius: var(--r); cursor: pointer; }
+
+/* Grid/flex items must not propagate the timeline canvas' intrinsic width
+   (duration × pxPerSec) into the page grid — a 30 s comp at 120 px/s used to
+   blow the centre column out to 3300 px and push the chrome off-screen. */
+#main, #timeline { min-width: 0; }
+#main > * { min-width: 0; }
+.tl-body, .tl-head { min-width: 0; }

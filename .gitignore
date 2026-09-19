@@ -1,8 +1,6 @@
 node_modules/
 test-results/
 .fontcache/
-probe-canvas.png
-probe3.png
-probe4.png
+exports/
 *.log
 .DS_Store

@@ -120,6 +120,9 @@ function styleKey(spec, registry) {
     spec.leading ?? 1.2, spec.align || 'left', spec.vAlign || 'top', spec.maxWidth || 0,
     spec.direction || 'auto', spec.case || 'none', spec.kerning === false ? 'k0' : 'k1',
     spec.text, Object.keys(a).sort().map(k => `${k}:${round(a[k], 3)}`).join(','),
+    // display styles change the ink, so they must bust the layout cache
+    spec.extrude ? `x${round(spec.extrude.depth ?? 0, 1)},${round(spec.extrude.angle ?? 90, 1)},${spec.extrude.color || '#000'}` : 'x-',
+    spec.highlight ? `h${spec.highlight.phrase || ''},${spec.highlight.color || ''}` : 'h-',
   ].join('|');
 }
 
@@ -532,6 +535,44 @@ function blitTinted(ctx, src, sx, sw, H, dx, dy, tint, blur, hue, brightness) {
   ctx.drawImage(_fx, 0, 0, sw, H, dx, dy, sw, H);
 }
 
+/* ══════════════ display styles: extrude + highlighter ══════════════
+   Both live in the CANVAS rasteriser, so every backend (WebGL2, Canvas2D,
+   export) inherits them for free — and Persian joining stays intact because
+   the extrude copies are blits of the same shaped line buffer.            */
+function extrudeOf(spec) {
+  const ex = spec.extrude;
+  const depth = Math.max(0, Math.round(ex?.depth ?? 0));
+  if (!depth) return null;
+  const ang = (ex?.angle ?? 90) * Math.PI / 180;   // 90° = straight down
+  return { depth, dx: Math.cos(ang), dy: Math.sin(ang), color: parseColor(ex?.color || '#000000') };
+}
+
+function blitExtrude(ctx, src, sx, sw, H, dx, dy, e) {
+  for (let d = e.depth; d >= 1; d--) {
+    blitTinted(ctx, src, sx, sw, H, dx + e.dx * d, dy + e.dy * d, e.color, 0, 0, 1);
+  }
+}
+
+/** Marker-pen rectangle behind a phrase, measured in the line's own font. */
+function highlightOf(layout, line, spec, registry) {
+  const hl = spec.highlight;
+  const phrase = String(hl?.phrase || '');
+  if (!phrase || !line.text || !line.text.includes(phrase)) return null;
+  const i = line.text.indexOf(phrase);
+  const mctx = scratchContext();
+  mctx.save();
+  applyFontTo(mctx, { ...spec, family: line.runs[0]?.family || spec.family }, registry);
+  mctx.direction = line.dir;
+  const full = mctx.measureText(line.text);
+  const pre = mctx.measureText(line.text.slice(0, i)).width;
+  const ph = mctx.measureText(phrase).width;
+  const asc = full.fontBoundingBoxAscent || full.actualBoundingBoxAscent || layout.size * 0.8;
+  const desc = full.fontBoundingBoxDescent || full.actualBoundingBoxDescent || layout.size * 0.22;
+  mctx.restore();
+  const x = line.dir === 'rtl' ? full.width - pre - ph : pre;
+  return { x, y: -asc * 1.02, w: ph, h: (asc + desc) * 1.04, css: hl.color || '#ffe14d' };
+}
+
 /* ══════════════ DRAW ══════════════ */
 export function drawLine(ctx, layout, line, time, opts = {}) {
   const buf = line.buffer;
@@ -542,10 +583,15 @@ export function drawLine(ctx, layout, line, time, opts = {}) {
   const destX = (opts.originX || 0) + line.x - PAD_X;
   const destY = (opts.originY || 0) + line.y - buf.vPad;
   const gAlpha = opts.opacity ?? 1;
+  const ex = extrudeOf(spec);
+  const hl = highlightOf(layout, line, spec, opts.registry);
+
+  if (hl) { ctx.save(); ctx.fillStyle = hl.css; ctx.fillRect(destX + PAD_X + hl.x, destY + buf.baseline + hl.y, hl.w, hl.h); ctx.restore(); }
 
   if (!animators.length) {
     // fast path: one blit, no scratch layer when the colour is white
     if (gAlpha < 1) { ctx.save(); ctx.globalAlpha *= gAlpha; }
+    if (ex) blitExtrude(ctx, buf.canvas, 0, buf.W, buf.H, destX, destY, ex);
     blitTinted(ctx, buf.canvas, 0, buf.W, buf.H, destX, destY, tint, 0, 0, 1);
     if (gAlpha < 1) ctx.restore();
     return;
@@ -565,6 +611,7 @@ export function drawLine(ctx, layout, line, time, opts = {}) {
     if (st.rotation) ctx.rotate(st.rotation * Math.PI / 180);
     if (st.scaleX !== 1 || st.scaleY !== 1) ctx.scale(st.scaleX, st.scaleY);
     ctx.translate(-(destX + ax), -(destY + ay));
+    if (ex) blitExtrude(ctx, buf.canvas, u.x0, w, buf.H, destX + u.x0, destY, ex);
     blitTinted(ctx, buf.canvas, u.x0, w, buf.H, destX + u.x0, destY, tint, st.blur, st.hue, st.brightness);
     ctx.restore();
   }

@@ -596,6 +596,130 @@ T('16. identity', 'every transport button carries an icon', ident.transportIcons
 T('16. identity', 'layer rows render svg icons', ident.layerIcons > 3, `${ident.layerIcons} svgs`);
 T('16. identity', 'no emoji left anywhere in the chrome', ident.chromeEmoji.length === 0, JSON.stringify(ident.chromeEmoji.slice(0, 3)));
 
+// ── 17. the reference piece: open the shipped demo and prove each scene looks right
+await page.evaluate(() => window.__FZ__.api.loadDemo());
+await page.waitForFunction(() => window.__FZ__.state.project.name === 'persian-epic', null, { timeout: 20000 });
+await page.waitForTimeout(900);   // asset rehydrate (fetch + decode)
+const demo = await page.evaluate(() => {
+  const p = window.__FZ__.state.project;
+  return {
+    layers: p.layers.length,
+    assets: (p.assets || []).length,
+    decoded: (p.assets || []).every(a => a.kind === 'audio' ? !!a.buffer : !!a.bitmap),
+    audio: (p.assets || []).find(a => a.kind === 'audio')?.duration || 0,
+    duration: p.comp.duration,
+    matte: p.layers.some(l => l.matte?.source),
+    extrude: p.layers.some(l => l.text?.extrude?.depth > 0),
+    highlight: p.layers.some(l => l.text?.highlight?.phrase),
+    keyfx: p.layers.some(l => (l.effects || []).some(e => Object.values(e.params || {}).some(v => v && v.keys))),
+  };
+});
+T('17. reference demo', 'the demo project opens with its full stack', demo.layers >= 15 && demo.duration === 30, `${demo.layers} layers / ${demo.duration}s`);
+T('17. reference demo', 'every shipped asset re-decodes from its src url', demo.decoded && demo.assets >= 6, `${demo.assets} assets`);
+T('17. reference demo', 'the score is decoded audio', demo.audio > 25, `${demo.audio.toFixed(1)}s`);
+T('17. reference demo', 'brush-stroke track matte is wired', demo.matte);
+T('17. reference demo', 'extrude + highlighter + keyframed effect params are in use', demo.extrude && demo.highlight && demo.keyfx);
+
+const sigAt = async (t) => {
+  await page.evaluate((tt) => { window.__FZ__.play(true); window.__FZ__.setTime(tt); window.__FZ__.redraw(); }, t);
+  await page.waitForTimeout(420);
+  return page.evaluate(() => window.__FZ__.frameSig());
+};
+const s03 = await sigAt(3);
+T('17. reference demo', 'scene 1: print-screen dots over the painting', s03.flips > 40, `flips=${s03.flips}`);
+T('17. reference demo', 'scene 1: no type yet', s03.yellow < 400, `yellow=${s03.yellow} (warm candlelight pixels, titles are ~18k)`);
+await page.screenshot({ path: `${OUT}/demo-t03.png` });
+const s09 = await sigAt(9.5);
+T('17. reference demo', 'scene 2: extruded yellow title over the herald', s09.yellow > 2000, `yellow=${s09.yellow}`);
+await page.screenshot({ path: `${OUT}/demo-t09.png` });
+const s17 = await sigAt(17);
+T('17. reference demo', 'scene 3: ink reveal + scattered words', s17.yellow > 1200 && s17.paper > 15000, `yellow=${s17.yellow} paper=${s17.paper}`);
+await page.screenshot({ path: `${OUT}/demo-t17.png` });
+const s28 = await sigAt(28);
+T('17. reference demo', 'scene 5: paper page + marker highlight', s28.paper > 250000 && s28.yellow > 600, `paper=${s28.paper} yellow=${s28.yellow}`);
+await page.screenshot({ path: `${OUT}/demo-t28.png` });
+
+
+// ── 18. v1.1 editing surface: markers, adjustment, remap, transitions, scopes, icon set
+const s18 = await page.evaluate(() => {
+  const FZ = window.__FZ__, api = FZ.api, st = FZ.state;
+  const out = {};
+  FZ.play(true); FZ.setTime(2);
+  const mk = api.addMarker();
+  out.mkCount = (st.project.markers || []).length;
+  out.mkT = mk.t;
+  FZ.setTime(5);
+  api.jumpMarker(-1);
+  out.jumpT = st.time;
+  api.deleteMarker(mk.id);
+  out.mkAfter = (st.project.markers || []).length;
+  st.selected = st.project.layers[0].id;
+  api.toggleAdjustment();
+  out.adj = !!st.project.layers[0].adjustment;
+  api.toggleAdjustment();
+  api.setSpeed(2.5);
+  out.speed = st.project.layers[0].speed;
+  api.setSpeed(1);
+  api.setTransition('in', 'cross', 0.8);
+  out.trIn = st.project.layers[0].transition?.in || null;
+  api.setTransition('in', '', 0);
+  out.trCleared = st.project.layers[0].transition == null;
+  return out;
+});
+T('18. editing surface', 'markers add / jump / delete through the api',
+  s18.mkCount === 1 && Math.abs(s18.mkT - 2) < 1e-6 && Math.abs(s18.jumpT - 2) < 1e-6 && s18.mkAfter === 0,
+  JSON.stringify(s18));
+T('18. editing surface', 'adjustment flag toggles on the selected layer', s18.adj === true);
+T('18. editing surface', 'time-remap rate writes through the api', s18.speed === 2.5);
+T('18. editing surface', 'boundary transition sets and clears', s18.trIn?.type === 'cross' && s18.trIn?.duration === 0.8 && s18.trCleared === true);
+
+await page.click('#right-tabs button[data-tab="scopes"]');
+// scopes paint on the throttled tick; wait for paint instead of guessing a delay
+let scopes = { drawn: false, lit: -1 };
+try {
+  await page.waitForFunction(() => {
+    const cv = document.querySelector('#scope-a');
+    if (!cv) return false;
+    const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+    let lit = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 1] > 120 && d[i + 3] > 40) lit++;
+    window.__lit = lit;
+    return lit > 50;
+  }, null, { timeout: 6000 });
+  scopes = { drawn: true, lit: await page.evaluate(() => window.__lit) };
+} catch { scopes = { drawn: false, lit: await page.evaluate(() => window.__lit ?? -1) }; }
+T('18. editing surface', 'scopes panel paints live luma data', scopes.drawn, `lit=${scopes.lit}`);
+
+await page.click('#left-tabs button[data-tab="effects"]');
+await page.waitForTimeout(250);
+const catIcons = await page.evaluate(() => [...document.querySelectorAll('.fx-cat')].map(h => h.querySelectorAll('svg').length));
+T('18. editing surface', 'every effect category header carries a real svg icon',
+  catIcons.length >= 6 && catIcons.every(n => n >= 1), `cats=${JSON.stringify(catIcons)}`);
+
+const shapeUi = await page.evaluate(() => {
+  const FZ = window.__FZ__;
+  const L = FZ.api.addLayer('shape', { shapeType: 'rect' });
+  FZ.state.selected = L?.id || FZ.state.selected;
+  return { id: FZ.state.selected };
+});
+await page.click('#right-tabs button[data-tab="inspect"]');
+await page.waitForTimeout(250);
+const grid = await page.evaluate(() => {
+  const g = document.querySelector('.shape-grid');
+  return { cells: g ? g.querySelectorAll('.sg-cell').length : 0, svg: g ? g.querySelectorAll('.sg-cell svg').length : 0 };
+});
+T('18. editing surface', 'the shape picker is an 11-cell svg icon grid', grid.cells === 11 && grid.svg === 11, JSON.stringify(grid));
+await page.evaluate(() => { const c = document.querySelectorAll('.shape-grid .sg-cell')[7]; c?.click(); });
+await page.waitForTimeout(200);
+const shapeNow = await page.evaluate(id => window.__FZ__.state.project.layers.find(l => l.id === id)?.shape?.type, shapeUi.id);
+T('18. editing surface', 'clicking a grid cell retypes the shape', shapeNow === 'gradient', `type=${shapeNow}`);
+
+const chromeIcons = await page.evaluate(() =>
+  ['#mk-add', '#mk-del', '#mk-prev', '#mk-next', '#btn-safe', '#btn-grid', '#tl-snap', '#tl-zoom-in', '#tl-zoom-out']
+    .map(sel => [sel, !!document.querySelector(sel + ' svg')]));
+T('18. editing surface', 'every new toolbar control renders its svg icon',
+  chromeIcons.every(([, ok]) => ok), JSON.stringify(chromeIcons.filter(([, ok]) => !ok)));
+
 await page.screenshot({ path: `${OUT}/app.png`, fullPage: false });
 await page.evaluate(() => { window.__FZ__.state.hudOn = true; document.querySelector('#hud')?.classList.add('on'); });
 await page.waitForTimeout(400);

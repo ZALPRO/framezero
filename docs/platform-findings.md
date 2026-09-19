@@ -1,7 +1,7 @@
 # FrameZero — Verified Platform Findings
 
 Measured with Playwright + Chromium headless (SwiftShader/Vulkan) on 2026-09-17.
-Every claim below is backed by `public/probe.html` / `public/probe2.html`.
+Every claim below is backed by the headless render suite (`public/tests/render.html`).
 
 ## 1. Variable fonts in Canvas 2D
 

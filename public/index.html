@@ -43,6 +43,8 @@
     <div class="backend-badge" id="backend-badge" title="Active render backend">
       <span class="dot"></span><span id="backend-name">detecting…</span>
     </div>
+    <button class="ghost" id="btn-safe" title="Toggle title/action safe areas"></button>
+    <button class="ghost" id="btn-grid" title="Toggle rule-of-thirds grid"></button>
     <button class="ghost" id="btn-hud" title="Toggle performance HUD (H)">HUD</button>
     <button class="ghost" id="btn-bench" title="Run the reproducible benchmark suite">Benchmark</button>
     <button class="ghost" id="btn-clearance" title="Font Clearance Report">Clearance</button>
@@ -110,6 +112,10 @@
   <section id="center">
     <div id="viewport-wrap">
       <canvas id="viewport" tabindex="0"></canvas>
+      <div id="vp-safe" class="vp-overlay hidden" aria-hidden="true">
+        <div class="safe-action"></div><div class="safe-title"></div>
+      </div>
+      <div id="vp-grid" class="vp-overlay hidden" aria-hidden="true"></div>
       <div id="vp-overlay">
         <div id="vp-guides"></div>
         <div id="vp-handles"></div>
@@ -153,11 +159,24 @@
       <button data-tab="type">Type</button>
       <button data-tab="axes">Axes</button>
       <button data-tab="fx">Effects</button>
+      <button data-tab="scopes">Scopes</button>
     </nav>
     <section class="tabpane on" data-pane="inspect"><div id="inspector" class="inspector"></div></section>
     <section class="tabpane" data-pane="type"><div id="type-panel" class="inspector"></div></section>
     <section class="tabpane" data-pane="axes"><div id="axes-panel" class="inspector"></div></section>
     <section class="tabpane" data-pane="fx"><div id="fx-panel" class="inspector"></div></section>
+    <section class="tabpane" data-pane="scopes">
+      <div id="scopes-panel">
+        <div class="seg scope-seg" id="scope-seg">
+          <button data-scope="wave" class="on">Waveform</button>
+          <button data-scope="hist">Histogram</button>
+          <button data-scope="vec">Vectors</button>
+        </div>
+        <canvas id="scope-a" width="252" height="150"></canvas>
+        <canvas id="scope-b" width="252" height="150"></canvas>
+        <div class="scope-note">Sampled from the live comp readback · 8 Hz · Rec.709 luma</div>
+      </div>
+    </section>
   </aside>
 </main>
 
@@ -178,8 +197,13 @@
       <button id="tl-zoom-out" class="ic">−</button>
       <input type="range" id="tl-zoom" min="20" max="600" value="120" aria-label="Timeline zoom">
       <button id="tl-zoom-in" class="ic">＋</button>
-      <button id="tl-snap" class="ic on" title="Snap to frames">⌖</button>
+      <button id="tl-snap" class="ic on" title="Snap to frames (S)"></button>
       <button id="tl-autokey" class="ic" title="Auto-key: record a keyframe whenever a property changes (K)"></button>
+      <span class="tl-sep"></span>
+      <button id="mk-prev" class="ic" title="Previous marker (Shift+,)"></button>
+      <button id="mk-add" class="ic" title="Add marker at playhead (M)"></button>
+      <button id="mk-next" class="ic" title="Next marker (Shift+.)"></button>
+      <button id="mk-del" class="ic" title="Delete nearest marker (Shift+M)"></button>
     </div>
     <div class="tl-comp">
       <label>comp</label>

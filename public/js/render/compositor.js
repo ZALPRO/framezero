@@ -14,6 +14,22 @@ import { layoutText, drawText, warmInstances, layoutReport } from './typography.
 import { rasterizeShape } from './shapes.js';
 import { propValue, M, clamp } from '../core/base.js';
 import { EFFECTS } from '../effects/registry.js';
+// canvas2d implementations that read the frame clock (animated output)
+const FX_CLOCK = new Set(['grain', 'turbulence', 'glitch']);
+
+/* Cache-key params: keyed effect values (a focus pull) would otherwise mint a
+   fresh key per frame. Quantising to half-pixel buckets keeps hits while the
+   applied pass still uses the exact value on a miss. */
+function quantiseParams(fx) {
+  const p = fx.params || {};
+  const out = {};
+  for (const [k, v] of Object.entries(p)) {
+    out[k] = typeof v === 'number'
+      ? Math.round(v * (fx.id === 'gaussianBlur' && k === 'radius' ? 2 : 20)) / (fx.id === 'gaussianBlur' && k === 'radius' ? 2 : 20)
+      : v;
+  }
+  return out;
+}
 
 export function createCompositor(kind) {
   switch (kind) {
@@ -70,7 +86,13 @@ export class Renderer {
   constructor() {
     this.compositor = null;
     this.backend = 'none';
-    this.rasters = new Map();      // layerId -> { canvas, ctx, w, h, key }
+    this.rasters = new Map();
+    // Effect-chain output cache (canvas2d backend): static chains on static
+    // rasters are rendered once and reused — a 2Mpx halftone must not re-run
+    // per frame. Keyed on layer + raster revision + params, so any upstream
+    // change (animated matte, keyed param, re-raster) invalidates it.
+    this._fxCache = new Map();
+    this._revSeq = 0;      // layerId -> { canvas, ctx, w, h, key }
     this.frameStats = { rasterMs: 0, effectMs: 0, compositeMs: 0, totalMs: 0, layers: 0, draws: 0, uploads: 0, passes: 0 };
     // Running average — a single frame's numbers are dominated by whatever the
     // scheduler did that millisecond, which once led us to a wrong conclusion
@@ -138,7 +160,9 @@ export class Renderer {
       return ['text', t.text, t.family, t.size, t.weight, t.tracking, t.leading, t.align,
         t.maxWidth || 0, t.direction || 'auto', t.case || 'none', t.color,
         (s.animators || []).map(an => JSON.stringify(an)).join(';'),
-        Math.round(time * 1000),
+        // Static text must not re-rasterise per frame (same trap the shape
+        // branch already avoids): time only matters while animators run.
+        (s.animators || []).length ? Math.round(time * 1000) : 0,
         Object.keys(a).sort().map(k => `${k}:${Math.round(a[k] * 1000)}`).join(',')].join('|');
     }
     if (layer.type === 'media') {
@@ -184,6 +208,7 @@ export class Renderer {
       rec.reused = false;
       const prev = this.rasters.get(layer.id);
       if (prev && prev.canvas !== rec.canvas) prev.canvas.close?.();
+      rec.rev = ++this._revSeq;
       this.rasters.set(layer.id, rec);
     }
     this.frameStats.rasterMs += performance.now() - t0;
@@ -225,6 +250,7 @@ export class Renderer {
       align: t.align || 'left', maxWidth: t.maxWidth || 0, direction: t.direction || 'auto',
       case: t.case, color: t.color || '#ffffff', axes: t.axes || {},
       anchor: t.anchor || 'center', vAnchor: t.vAnchor || 'baseline',
+      extrude: t.extrude, highlight: t.highlight,
     };
     warmInstances(spec, registry);
     const layout = layoutText(spec, registry, this._measureCtx());
@@ -240,6 +266,7 @@ export class Renderer {
       x: margin, y: margin,
       animators: s.animators || [],
       opacity: 1,
+      registry,
     });
 
     // the layer matrix must compensate for the margin we added
@@ -256,14 +283,19 @@ export class Renderer {
   _rasterizeMedia(layer, time, opts) {
     const s = layer.resolved || layer;
     const m = s.media || {};
-    const w = Math.max(1, Math.round(s.width || layer.width || 640));
-    const h = Math.max(1, Math.round(s.height || layer.height || 360));
+    const asset0 = opts.assets?.get?.(m.assetId);
+    // media size = the source's natural size unless the layer overrides it
+    // (resolved.width carries the 640×360 shape default, which must NOT win here)
+    const w = Math.max(1, Math.round(layer.width || asset0?.width || 640));
+    const h = Math.max(1, Math.round(layer.height || asset0?.height || 360));
     const canvas = this._canvasFor(layer.id, w, h);
     const ctx = canvas.getContext('2d', { alpha: true });
     ctx.clearRect(0, 0, w, h);
-    const asset = opts.assets?.get?.(m.assetId);
+    const asset = asset0;
     const src = asset && (asset.bitmap || asset.video);
     if (src) { try { ctx.drawImage(src, 0, 0, w, h); } catch { /* not decoded yet */ } }
+    // a hand-authored media layer without explicit dims keeps the source's
+    // natural size instead of the 640×360 default (demo projects, re-opened files)
     layer._rasterOffset = { x: 0, y: 0, w, h };
     return { canvas, ctx, w, h, kind: 'media' };
   }
@@ -413,7 +445,25 @@ export class Renderer {
       if (layer.in !== undefined && time < layer.in) continue;
       if (layer.out !== undefined && time >= layer.out) continue;
 
-      const rec = this.rasterizeLayer(layer, time, registry, { ...opts, byId });
+      /* Adjustment layer (AE semantics): draws nothing itself — its chain runs
+         on the composite accumulated so far, i.e. on everything below it. */
+      if (layer.adjustment) {
+        const achain = (layer.effects || []).filter(fx => fx && fx.enabled !== false && EFFECTS[fx.id]);
+        if (achain.length && c.snapshotComp) {
+          let h = c.snapshotComp();
+          for (const fx of achain) h = c.applyEffect(h, fx, fx.params, time);
+          c.presentComp(h);
+          this.frameStats.passes += achain.length;
+        }
+        continue;
+      }
+
+      /* Time remap: the layer's CONTENT (media frames, noise fields, text
+         animators) reads the remapped clock; transform and effect keys stay on
+         comp time, exactly like AE's Time Remap vs property keyframes. */
+      const srcTime = this._srcTime(layer, time);
+
+      const rec = this.rasterizeLayer(layer, srcTime, registry, { ...opts, byId });
       if (!rec) continue;
 
       /* Track matte, Premiere-style: a link in the layer's own chain, applied
@@ -425,10 +475,12 @@ export class Renderer {
          any earlier link in the chain). The matted result is a fresh canvas:
          mutating the cached raster would compound the cut on every cache hit. */
       let src = rec;
+      let matteRev = 0;
       if (layer.matte) {
         const ml = byId.get(layer.matte.id);
         if (ml && ml.id !== layer.id) {
-          const mrec = this.rasterizeLayer(ml, time, registry, opts);
+          const mrec = this.rasterizeLayer(ml, this._srcTime(ml, time), registry, opts);
+          matteRev = mrec ? (mrec.rev || 0) : 0;
           if (mrec) {
             const mt = this._layerMatrix(layer, rec);
             const mm = this._layerMatrix(ml, mrec);
@@ -442,15 +494,31 @@ export class Renderer {
       this.frameStats.uploads++;
 
       const te0 = performance.now();
-      for (const fx of layer.effects || []) {
-        if (!fx || fx.enabled === false) continue;
-        const def = EFFECTS[fx.id];
-        if (!def) continue;
-        // Effects run on the layer-local raster, which is in COMP space, so
-        // their 'px' params are already correct as authored; only the final
-        // composite matrix carries the device scale.
-        handle = c.applyEffect(handle, fx, fx.params, time);
-        this.frameStats.passes++;
+      const chain = (layer.effects || []).filter(fx => fx && fx.enabled !== false && EFFECTS[fx.id]);
+      // canvas2d effects never read the clock, so a chain on an unchanged
+      // raster is pure repeat work — cache its output canvas.
+      const clocked = chain.some(fx => FX_CLOCK.has(fx.id));
+      const fkey = this.backend === 'canvas2d' && chain.length && !clocked
+        ? `${layer.id}|${rec.rev || 0}|${matteRev || 0}|${clocked ? Math.floor(time * 24) : 0}|${JSON.stringify(chain.map(fx => [fx.id, quantiseParams(fx)]))}`
+        : null;
+      const cached = fkey && this._fxCache.get(fkey);
+      if (cached) {
+        handle = cached;
+      } else {
+        for (const fx of chain) {
+          // Effects run on the layer-local raster, which is in COMP space, so
+          // their 'px' params are already correct as authored; only the final
+          // composite matrix carries the device scale.
+          handle = c.applyEffect(handle, fx, fx.params, time);
+          this.frameStats.passes++;
+        }
+        if (fkey) {
+          const cv = document.createElement('canvas');
+          cv.width = handle.w; cv.height = handle.h;
+          cv.getContext('2d').drawImage(handle.canvas, 0, 0);
+          if (this._fxCache.size > 96) this._fxCache.clear();
+          this._fxCache.set(fkey, { canvas: cv, w: handle.w, h: handle.h, _flip: 0 });
+        }
       }
       this.frameStats.effectMs += performance.now() - te0;
 
@@ -458,8 +526,33 @@ export class Renderer {
       const matrix = this._layerMatrix(layer, rec);
       // comp space → device space, once, here, for both backends
       const vs = this.viewScale || 1;
-      const m = vs === 1 ? matrix : M.mul([vs, 0, 0, vs, 0, 0], matrix);
-      c.drawLayer(handle, { matrix: m, opacity: op, blend: layer.blend || 'normal' });
+      let m = vs === 1 ? matrix : M.mul([vs, 0, 0, vs, 0, 0], matrix);
+      let drawOp = op, scissor = null;
+
+      /* Boundary transitions (Premiere): cross / wipe / slide at the edges of
+         the layer's time window. Computed here so both backends get plain
+         draw parameters — opacity, matrix offset, comp-space scissor. */
+      const tr = layer.transition;
+      if (tr) {
+        const W = scene.width, H = scene.height;
+        const ease = x => x * x * (3 - 2 * x);
+        if (tr.in && layer.in !== undefined && time < layer.in + tr.in.duration) {
+          const p = ease(clamp((time - layer.in) / tr.in.duration, 0, 1));
+          if (tr.in.type === 'cross') drawOp *= p;
+          else if (tr.in.type === 'wipeL') scissor = [0, 0, W * p, H];
+          else if (tr.in.type === 'wipeR') scissor = [W * (1 - p), 0, W * p, H];
+          else if (tr.in.type === 'slideL') { m = [...m]; m[4] -= (1 - p) * W * vs; }
+          else if (tr.in.type === 'slideR') { m = [...m]; m[4] += (1 - p) * W * vs; }
+        } else if (tr.out && layer.out !== undefined && time > layer.out - tr.out.duration) {
+          const q = ease(clamp((layer.out - time) / tr.out.duration, 0, 1));
+          if (tr.out.type === 'cross') drawOp *= q;
+          else if (tr.out.type === 'wipeL') scissor = [W * (1 - q), 0, W * q, H];
+          else if (tr.out.type === 'wipeR') scissor = [0, 0, W * q, H];
+          else if (tr.out.type === 'slideL') { m = [...m]; m[4] -= (1 - q) * W * vs; }
+          else if (tr.out.type === 'slideR') { m = [...m]; m[4] += (1 - q) * W * vs; }
+        }
+      }
+      c.drawLayer(handle, { matrix: m, opacity: drawOp, blend: layer.blend || 'normal', scissor });
       this.frameStats.layers++;
       this.frameStats.draws++;
     }
@@ -485,6 +578,14 @@ export class Renderer {
    * The raster carries a margin (text) that must be cancelled out, then the
    * layer's own transform/anchor/position apply.
    */
+  /** Remapped source clock for a layer (time-remap rate). */
+  _srcTime(layer, time) {
+    const spd = Number(layer?.speed);
+    if (!Number.isFinite(spd) || spd === 1 || spd === 0) return time;
+    const lin = layer.in || 0;
+    return lin + (time - lin) * spd;
+  }
+
   _layerMatrix(layer, rec) {
     const s = layer.resolved || layer;
     const off = layer._rasterOffset || { x: 0, y: 0 };

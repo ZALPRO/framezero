@@ -30,7 +30,9 @@ instrumentation (frame-time HUD, node/pass counters, benchmark harness).
 | **Composition** | Layer stack (text / shape / solid / media), transforms with keyframes & easing curves, blend modes, solo/lock/visibility, in/out points, auto-key |
 | **Typography** | Variable fonts with real axis control (incl. all 13 Roboto Flex axes), per-character animators, Persian/Arabic shaping-safe stack, **Font Clearance Report** that audits glyph coverage per font |
 | **Effects** | 16 effects (blur, glow, shadow, color ops, displacement, …) as a per-layer chain, keyable parameters, identical output on both backends |
-| **Masks & mattes** | Ellipse/rect masks with add/subtract/intersect, feather, invert, per-item and stack toggles; alpha & luma track mattes that follow the source transform |
+| **Masks & mattes** | Pen/ellipse/rect masks with add/subtract/intersect, feather, invert, per-item and stack toggles; alpha & luma track mattes that follow the source transform |
+| **AE layer semantics** | Adjustment layers (chain grades the composite below), time remap with reverse rate, boundary transitions (cross dissolve, wipes, slides), comp markers with colours & labels |
+| **Monitoring** | Lumetri-style scopes (luma waveform, histogram, vectorscope) from the live readback, title/action safe areas, thirds grid |
 | **Media & audio** | Image / video / audio import with decode-at-import, waveform envelopes in the timeline, video sync with drift correction, per-layer volume/mute, master gain |
 | **Export** | Real WebM video via MediaRecorder on the canvas stream + master audio; PNG frame export; project save/open (JSON) |
 | **Performance** | WebGL2 batched pipeline with raster cache & proxy scaling, draft/exact modes, frame-time HUD with budget line, benchmark harness, software-fallback honesty |
@@ -105,24 +107,15 @@ favicon. All four candidates remain in `public/logos/`.
 
 ## Roadmap
 
-Pen/shape masks, adjustment layers & precomps, offline render queue with
-H.264/mp4, WebGPU backend, waveform editing (trim/crossfade), audio effects,
-image sequences, preset library, multi-user collaboration. Details in
-`STATUS.md`.
+Precomps with essential properties, expressions (sandboxed subset), offline
+render queue with H.264/mp4, WebGPU backend, ripple/roll/slip trim tools,
+waveform editing (trim/crossfade), audio effects, image sequences, preset
+library, motion tracking, multi-user collaboration. The full parity matrix
+against After Effects & Premiere Pro lives in `docs/FEATURE-GAP.md`;
+progress notes in `STATUS.md`.
 
 ## License
 
 MIT — see [LICENSE](LICENSE). Bundled fonts are OFL (see [NOTICE](NOTICE.md)).
 
 ---
-
-## فارسی
-
-**FrameZero** یک استودیوی موشن‌دیزاین و تایپوگرافی سینتیک کاملاً داخل مرورگر است:
-کامپوزیشن لایه‌ها با کی‌فریم و منحنی easing، موتور فونت متغیر با کنترل واقعی محورها
-(از جمله هر ۱۳ محور Roboto Flex) و پشتیبانی کامل فارسی با Vazirmatn و Noto Sans
-Arabic، ۱۶ افکت زنجیره‌ای، ماسک و ترک‌مت، ایمپورت تصویر/ویدیو/صدا با waveform در
-تایم‌لاین، خروجی WebM واقعی، و HUD پرفورمنس صادقانه که روی سیستم بدون GPU هم حرف
-درست می‌زند. بدون هیچ وابستگی runtime و بدون بیلد: `npm start` و تمام.
-دروازهٔ تست شامل ۴۰۴ بررسی است (اسموک مرورگری، پیکسلی دوموتوره، مدل سند و
-تایپوگرافی) و تا سبز نشود چیزی عبور نمی‌کند.

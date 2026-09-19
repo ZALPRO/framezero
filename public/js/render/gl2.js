@@ -634,7 +634,21 @@ ${main}`;
    * @param handle texture handle
    * @param matrix affine [a,b,c,d,e,f]: layer-space px → comp px
    */
-  drawLayer(handle, { matrix, opacity = 1, blend = 'normal' } = {}) {
+  /** Scissor-aware wrapper: the clip rect is in comp space, like everything
+      else the compositor speaks. */
+  drawLayer(handle, opts = {}) {
+    if (!opts.scissor) return this._drawLayer(handle, opts);
+    const gl = this.gl;
+    if (!gl) return;
+    const d = this.dpr || 1;
+    const [sx, sy, sw, sh] = opts.scissor;
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(Math.round(sx * d), Math.round((this.pixelHeight / d - (sy + sh)) * d), Math.round(sw * d), Math.round(sh * d));
+    try { return this._drawLayer(handle, opts); }
+    finally { gl.disable(gl.SCISSOR_TEST); }
+  }
+
+  _drawLayer(handle, { matrix, opacity = 1, blend = 'normal' } = {}) {
     const gl = this.gl;
     if (!gl || !handle || opacity <= 0.0015) return;
     const xform = this._layerXform(matrix, handle.w, handle.h);
@@ -698,6 +712,32 @@ ${main}`;
     const gl = this.gl;
     if (gl) { gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.flush(); }
     return { ...this.stats };
+  }
+
+  /** Freeze the comp buffer as an effect-chain source (adjustment layers). */
+  snapshotComp() {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.pixelWidth, this.pixelHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, this.pixelWidth, this.pixelHeight);
+    return { tex, w: this.pixelWidth, h: this.pixelHeight, _owned: true };
+  }
+
+  /** Replace the comp buffer with an effect-chain result (adjustment layers). */
+  presentComp(handle) {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.pixelWidth, this.pixelHeight);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    this._drawLayer(handle, { matrix: [1, 0, 0, 1, 0, 0], opacity: 1, blend: 'normal' });
+    if (handle._owned) gl.deleteTexture(handle.tex);
   }
 
   /** Forced readback — tests and export only, never the interactive path. */

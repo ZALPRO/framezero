@@ -45,6 +45,7 @@ const state = {
   loop: true,
   snap: true,
   autoKey: false,
+  markerSel: null, scopeMode: 'wave',
   quality: 'draft',        // 'draft' = proxy resolution, 'exact' = full
   selected: null,
   openFx: null,
@@ -226,13 +227,25 @@ function fitViewportCSS(canvas, compW, compH) {
   canvas.style.height = `${Math.max(16, Math.round(compH * k))}px`;
 }
 
+const MARKER_COLORS = ['#00e5a0', '#ffc46b', '#6bb8ff', '#ff7ab8', '#c792ea', '#7ee787'];
+
+/** Marker closest to a time, within half a second — for delete-by-proximity. */
+function nearestMarker(t) {
+  const list = state.project.markers || [];
+  let best = null, bd = 0.5;
+  for (const mk of list) { const d = Math.abs(mk.t - t); if (d <= bd) { bd = d; best = mk; } }
+  return best;
+}
+
 /* ══════════════════════════════ render loop ══════════════════════════════ */
 
 function startLoop() {
   lastTick = performance.now();
   const tick = (now) => {
     rafId = requestAnimationFrame(tick);
-    const dt = Math.min(0.1, (now - lastTick) / 1000);
+    // While the exporter records, the transport must track the wall clock:
+    // a slow software-rendered frame may not cost the piece its timing.
+    const dt = Math.min(state._exporting ? 1 : 0.1, (now - lastTick) / 1000);
     lastTick = now;
 
     if (state.playing) {
@@ -246,6 +259,7 @@ function startLoop() {
       if (!state.playing) stopAudioVoices();
     }
     if (needsRender) { needsRender = false; renderOnce(now); }
+    drawScopes();
     fpsClock.n++;
     if (now - fpsClock.t0 >= 500) {
       state.fps = Math.round(fpsClock.n * 1000 / (now - fpsClock.t0));
@@ -254,6 +268,104 @@ function startLoop() {
     }
   };
   rafId = requestAnimationFrame(tick);
+}
+
+/* ══════════════════════════ scopes (Lumetri-style) ══════════════════════════ */
+
+let scopeClock = 0;
+/** Waveform / histogram / vectorscope from the live comp readback. Sampling is
+    throttled to ~8 Hz: scopes are monitoring, not part of the render path. */
+function drawScopes(force = false) {
+  const pane = $('#right .tabpane[data-pane="scopes"]');
+  if (!pane || !pane.classList.contains('on')) return;
+  const now = performance.now();
+  if (!force && now - scopeClock < 120) return;
+  scopeClock = now;
+  const rb = state.renderer?.readback?.();
+  if (!rb) return;
+  const sw = 96, sh = 54;
+  const c = document.createElement('canvas'); c.width = sw; c.height = sh;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(rb.canvas, 0, 0, sw, sh);
+  const px = g.getImageData(0, 0, sw, sh).data;
+  const luma = new Float32Array(sw * sh), cr = new Float32Array(sw * sh), cb = new Float32Array(sw * sh);
+  const hist = new Float32Array(64);
+  for (let i = 0, n = sw * sh; i < n; i++) {
+    const r = px[i * 4] / 255, gg = px[i * 4 + 1] / 255, b = px[i * 4 + 2] / 255;
+    const y = 0.2126 * r + 0.7152 * gg + 0.0722 * b;
+    luma[i] = y;
+    cr[i] = 0.713 * (r - y); cb[i] = 0.564 * (b - y);
+    hist[Math.min(63, Math.round(y * 63))]++;
+  }
+  const mode = state.scopeMode || 'wave';
+  const A = $('#scope-a'), B = $('#scope-b');
+  if (mode === 'wave') { paintWave(A, luma, sw, sh); paintHist(B, hist); }
+  else if (mode === 'hist') { paintHist(A, hist); paintWave(B, luma, sw, sh); }
+  else { paintVec(A, cr, cb, sw, sh); paintHist(B, hist); }
+}
+
+function scopeCtx(cv) {
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, cv.width, cv.height);
+  g.fillStyle = '#0b0f15'; g.fillRect(0, 0, cv.width, cv.height);
+  return g;
+}
+
+function paintWave(cv, luma, sw, sh) {
+  if (!cv) return;
+  const g = scopeCtx(cv), W = cv.width, H = cv.height;
+  g.strokeStyle = 'rgba(255,255,255,.07)';
+  for (const f of [0.25, 0.5, 0.75]) { g.beginPath(); g.moveTo(0, H * f); g.lineTo(W, H * f); g.stroke(); }
+  const img = g.createImageData(W, H);
+  for (let x = 0; x < W; x++) {
+    const sx = Math.floor(x / W * sw);
+    for (let i = 0; i < sh; i++) {
+      const y = luma[i * sw + sx];
+      const py = Math.round((1 - y) * (H - 1));
+      const o = (py * W + x) * 4;
+      img.data[o] = 120; img.data[o + 1] = 255; img.data[o + 2] = 190; img.data[o + 3] = Math.min(255, img.data[o + 3] + 60);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  g.fillStyle = '#8a93a6'; g.font = '9px ui-monospace,monospace';
+  g.fillText('LUMA WAVEFORM', 6, 11);
+}
+
+function paintHist(cv, hist) {
+  if (!cv) return;
+  const g = scopeCtx(cv), W = cv.width, H = cv.height;
+  const max = Math.max(1, ...hist);
+  g.fillStyle = '#6bb8ff';
+  for (let i = 0; i < 64; i++) {
+    const h = (hist[i] / max) * (H - 18);
+    g.fillRect(4 + i * (W - 8) / 64, H - 6 - h, Math.max(1, (W - 8) / 64 - 1), h);
+  }
+  g.fillStyle = '#8a93a6'; g.font = '9px ui-monospace,monospace';
+  g.fillText('LUMA HISTOGRAM', 6, 11);
+}
+
+function paintVec(cv, cr, cb, sw, sh) {
+  if (!cv) return;
+  const g = scopeCtx(cv), W = cv.width, H = cv.height;
+  const cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 10;
+  g.strokeStyle = 'rgba(255,255,255,.12)';
+  g.beginPath(); g.arc(cx, cy, R, 0, 7); g.stroke();
+  g.beginPath(); g.arc(cx, cy, R * 0.55, 0, 7); g.stroke();
+  g.beginPath(); g.moveTo(cx - R, cy); g.lineTo(cx + R, cy); g.moveTo(cx, cy - R); g.lineTo(cx, cy + R); g.stroke();
+  g.fillStyle = 'rgba(255,255,255,.35)'; g.font = '8px ui-monospace,monospace';
+  for (const [nm, u, v] of [['R', .62, -.11], ['G', -.32, -.44], ['B', -.30, .55], ['Cy', .62, .11], ['Mg', .62, -.67], ['Yl', .02, -.55]]) {
+    g.fillText(nm, cx + u * R - 3, cy + v * R + 3);
+  }
+  const img = g.getImageData(0, 0, W, H);
+  for (let i = 0; i < sw * sh; i++) {
+    const x = Math.round(cx + cr[i] * R * 2.2), y = Math.round(cy + cb[i] * R * 2.2);
+    if (x < 0 || y < 0 || x >= W || y >= H) continue;
+    const o = (y * W + x) * 4;
+    img.data[o] = 140; img.data[o + 1] = 255; img.data[o + 2] = 200; img.data[o + 3] = Math.min(255, img.data[o + 3] + 70);
+  }
+  g.putImageData(img, 0, 0);
+  g.fillStyle = '#8a93a6'; g.font = '9px ui-monospace,monospace';
+  g.fillText('VECTORSCOPE', 6, 11);
 }
 
 function renderOnce(now) {
@@ -371,6 +483,11 @@ function wireTransport() {
   setIcon($('#btn-play'), 'play', 15); setIcon($('#btn-next'), 'nextKey', 15);
   setIcon($('#btn-end'), 'end', 15); setIcon($('#btn-loop'), 'loop', 15);
   setIcon($('#tl-autokey'), 'key', 14);
+  setIcon($('#tl-snap'), 'magnet', 14);
+  setIcon($('#tl-zoom-in'), 'zoomIn', 14); setIcon($('#tl-zoom-out'), 'zoomOut', 14);
+  setIcon($('#mk-add'), 'markerAdd', 14); setIcon($('#mk-del'), 'markerDel', 14);
+  setIcon($('#mk-prev'), 'markerPrev', 14); setIcon($('#mk-next'), 'markerNext', 14);
+  setIcon($('#btn-safe'), 'safeArea', 14); setIcon($('#btn-grid'), 'grid', 14);
   const on = (id, fn) => $(id)?.addEventListener('click', fn);
   on('#btn-play', () => play());
   on('#btn-start', () => { play(true); setTime(0); });
@@ -407,6 +524,28 @@ function wireTransport() {
   });
   $('#tl-snap')?.addEventListener('click', e => { state.snap = !state.snap; e.currentTarget.classList.toggle('on', state.snap); });
   $('#tl-autokey')?.addEventListener('click', e => { state.autoKey = !state.autoKey; e.currentTarget.classList.toggle('on', state.autoKey); toast(`Auto-key ${state.autoKey ? 'ON — every property change writes a keyframe' : 'off'}`, 'ok'); });
+
+  /* markers — comp-level, AE/Premiere style */
+  $('#mk-add')?.addEventListener('click', () => api.addMarker());
+  $('#mk-del')?.addEventListener('click', () => api.deleteMarker());
+  $('#mk-prev')?.addEventListener('click', () => api.jumpMarker(-1));
+  $('#mk-next')?.addEventListener('click', () => api.jumpMarker(1));
+
+  /* viewport overlays */
+  const overlay = (btn, node) => $(btn)?.addEventListener('click', e => {
+    const n = $(node); if (!n) return;
+    n.classList.toggle('hidden');
+    e.currentTarget.classList.toggle('on', !n.classList.contains('hidden'));
+  });
+  overlay('#btn-safe', '#vp-safe');
+  overlay('#btn-grid', '#vp-grid');
+
+  /* scopes panel mode */
+  $$('#scope-seg button').forEach(b => b.addEventListener('click', () => {
+    $$('#scope-seg button').forEach(x => x.classList.toggle('on', x === b));
+    state.scopeMode = b.dataset.scope;
+    drawScopes(true);
+  }));
 }
 
 function syncCompUI() {
@@ -475,6 +614,7 @@ function wireTimeline() {
     const cv = $(id);
     if (!cv) continue;
     cv.addEventListener('pointerdown', e => {
+      if (cv === ruler && clickMarker(e)) return;
       tl.dragging = true; cv.setPointerCapture(e.pointerId);
       play(true); scrubFromEvent(e, cv);
     });
@@ -484,6 +624,18 @@ function wireTimeline() {
   $('#tl-scroll')?.addEventListener('scroll', () => drawTimeline());
   new ResizeObserver(() => { sizeTimelineCanvases(); drawTimeline(); }).observe($('#timeline') || document.body);
   sizeTimelineCanvases();
+}
+
+/** True when the click landed on a marker flag — selects and jumps to it. */
+function clickMarker(e) {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const x = e.clientX - rect.left + (($('#tl-scroll')?.scrollLeft) || 0);
+  const hit = (state.project.markers || []).find(mk => Math.abs(mk.t * tl.pxPerSec - x) <= 5);
+  if (!hit) return false;
+  state.markerSel = hit.id;
+  play(true); setTime(hit.t);
+  drawTimeline();
+  return true;
 }
 
 function scrubFromEvent(e, cv) {
@@ -539,6 +691,17 @@ function drawTimeline() {
       }
     }
     g.strokeStyle = '#232a38'; g.beginPath(); g.moveTo(0, H - 0.5); g.lineTo(W, H - 0.5); g.stroke();
+    // comp markers: little flags riding the top edge of the ruler
+    for (const mk of p.markers || []) {
+      const x = Math.round(mk.t * tl.pxPerSec) + 0.5;
+      if (x < -8 || x > W + 8) continue;
+      const col = mk.color || '#00e5a0';
+      g.fillStyle = col;
+      g.beginPath(); g.moveTo(x, 14); g.lineTo(x + 7, 17.5); g.lineTo(x, 21); g.closePath(); g.fill();
+      g.strokeStyle = col; g.lineWidth = 1.4;
+      g.beginPath(); g.moveTo(x, 14); g.lineTo(x, H - 2); g.stroke();
+      if (state.markerSel === mk.id) { g.strokeStyle = '#fff'; g.lineWidth = 1; g.strokeRect(x - 2.5, 12.5, 11, 10); }
+    }
   }
   if (tracks) {
     const g = tracks.getContext('2d');
@@ -595,7 +758,15 @@ function roundRect(g, x, y, w, h, r) {
 function positionPlayhead() {
   const ph = $('#tl-playhead');
   if (!ph) return;
-  ph.style.left = `${round(state.time * tl.pxPerSec, 2)}px`;
+  const x = round(state.time * tl.pxPerSec, 2);
+  ph.style.left = `${x}px`;
+  // keep the playhead in view when a marker jump or seek lands off-screen
+  const sc = $('#tl-scroll');
+  if (sc && !tl.dragging) {
+    const pad = 60;
+    if (x < sc.scrollLeft + pad) sc.scrollLeft = Math.max(0, x - pad);
+    else if (x > sc.scrollLeft + sc.clientWidth - pad) sc.scrollLeft = x - sc.clientWidth + pad;
+  }
   ph.style.height = `${($('#tl-tracks')?.clientHeight || 80) + 26}px`;
 }
 
@@ -776,6 +947,62 @@ const api = {
     if (j < 0 || j >= arr.length) return;
     pushUndo(); [arr[i], arr[j]] = [arr[j], arr[i]]; commit();
   },
+  seek(t) { play(true); setTime(clamp(Number(t) || 0, 0, state.duration)); },
+
+  /* ── markers (AE/Premiere comp markers) ── */
+  addMarker(patch = {}) {
+    const mk = { id: uid('mk'), t: round(state.time, 3), color: patch.color || MARKER_COLORS[(state.project.markers || []).length % MARKER_COLORS.length], label: patch.label || '' };
+    state.project.markers = [...(state.project.markers || []), mk].sort((a, b) => a.t - b.t);
+    state.markerSel = mk.id;
+    commit(); drawTimeline();
+    toast(`Marker @ ${tc(mk.t, state.project.comp.fps || 30)}`, 'ok');
+    return mk;
+  },
+  deleteMarker(id) {
+    const list = state.project.markers || [];
+    const target = id || nearestMarker(state.time)?.id;
+    if (!target) { toast('No marker near the playhead', 'info'); return; }
+    state.project.markers = list.filter(mk => mk.id !== target);
+    if (state.markerSel === target) state.markerSel = null;
+    commit(); drawTimeline();
+  },
+  jumpMarker(dir) {
+    const list = state.project.markers || [];
+    if (!list.length) { toast('No markers yet — press M at the playhead', 'info'); return; }
+    const next = dir > 0 ? list.find(mk => mk.t > state.time + 1e-4) : [...list].reverse().find(mk => mk.t < state.time - 1e-4);
+    const mk = next || (dir > 0 ? list[0] : list[list.length - 1]);
+    state.markerSel = mk.id;
+    play(true); setTime(mk.t); drawTimeline();
+  },
+  setMarker(id, patch) {
+    const mk = (state.project.markers || []).find(m => m.id === id);
+    if (!mk) return;
+    Object.assign(mk, patch);
+    if (patch.t != null) state.project.markers = [...state.project.markers].sort((a, b) => a.t - b.t);
+    commit(); drawTimeline();
+  },
+
+  /* ── layer time & compositing semantics ── */
+  setSpeed(v) {
+    const L = sel(); if (!L) return;
+    const spd = clamp(Number(v) || 1, -8, 8);
+    L.speed = Math.abs(spd) < 0.05 ? (spd < 0 ? -0.05 : 0.05) : spd;
+    commit(); toast(`Time remap ×${round(L.speed, 2)}`, 'ok');
+  },
+  toggleAdjustment() {
+    const L = sel(); if (!L) return;
+    L.adjustment = !L.adjustment;
+    commit();
+    toast(L.adjustment ? 'Adjustment layer — its effects now grade everything below it' : 'Adjustment layer off', 'ok');
+  },
+  setTransition(side, type, duration) {
+    const L = sel(); if (!L) return;
+    L.transition = L.transition || {};
+    if (!type) { delete L.transition[side]; if (!L.transition.in && !L.transition.out) L.transition = null; }
+    else L.transition[side] = { type, duration: clamp(Number(duration) || 0.5, 0.04, 5) };
+    commit();
+  },
+
   /* ── effects ── */
   addEffect(id) {
     const L = sel(); if (!L) { toast('Select a layer first', 'warn'); return; }
@@ -844,6 +1071,21 @@ const api = {
     needsRender = true; markDirty();
   },
   /* ── assets ── */
+  async loadDemo() {
+    const r = await fetch('projects/persian-epic.fz.json');
+    if (!r.ok) { toast('Demo project is missing from the server', 'err'); return; }
+    const { project, error } = deserialize(await r.text());
+    if (error) { toast(`Cannot open the demo: ${error}`, 'err'); return; }
+    pushUndo();
+    state.project = project;
+    state.selected = project.layers[0]?.id || null;
+    state.duration = projectDuration(project);
+    state.time = 0;
+    await rehydrateAssets(project);
+    await attachRenderer();
+    setTime(0); redraw();
+    toast(`Opened ${project.name} — ${project.layers.length} layers, ${(project.assets || []).length} assets`, 'ok');
+  },
   addAssetToComp(a) {
     pushUndo();
     const c = state.project.comp;
@@ -1079,6 +1321,7 @@ function paletteCommands() {
     { label: 'Redo', hint: '⌘⇧Z', run: () => doRedo() },
     ...COMP_PRESETS.map(c => ({ label: `Comp size → ${c.label}`, run: async () => { pushUndo(); state.project.comp.width = c.w; state.project.comp.height = c.h; await attachRenderer(); redraw(); } })),
   ];
+  cmds.push({ label: 'Open demo: Persian Epic (the 30s reference piece)', hint: 'demo', run: () => api.loadDemo() });
   for (const fx of EFFECT_LIST) cmds.push({ label: `Add effect: ${fx.name}`, hint: fx.category, run: () => api.addEffect(fx.id) });
   for (const f of state.registry?.families() || []) cmds.push({ label: `Typeface → ${f}`, run: () => api.setFont(f) });
   for (const l of state.project.layers) cmds.push({ label: `Select layer: ${l.name}`, run: () => api.select(l.id) });
@@ -1237,6 +1480,40 @@ function saveProject() {
   toast(`Saved ${state.project.name}.fz.json (${(text.length / 1024).toFixed(1)} KB)`, 'ok');
 }
 
+/* Saved projects keep a `src` URL for every asset that came from the server
+   (demo library, re-opened files). Decoded blobs cannot survive JSON, so we
+   re-fetch + re-decode them here — import-only, never in the render loop. */
+async function rehydrateAssets(project) {
+  const need = (project.assets || []).filter(a => a.src && !a.bitmap && !a.video && !a.buffer);
+  for (const a of need) {
+    try {
+      if (a.kind === 'image') {
+        const r = await fetch(a.src); const blob = await r.blob();
+        const bm = await createImageBitmap(blob);
+        a.bitmap = bm; a.width = bm.width; a.height = bm.height; a.meta = `${bm.width}×${bm.height}`;
+      } else if (a.kind === 'video') {
+        const video = document.createElement('video');
+        video.src = a.src; video.muted = true; video.preload = 'auto'; video.playsInline = true;
+        await new Promise((res, rej) => {
+          video.onloadedmetadata = () => res();
+          video.onerror = () => rej(new Error('cannot decode'));
+          setTimeout(() => rej(new Error('metadata timeout')), 15000);
+        });
+        a.video = video; a.url = a.src; a.duration = video.duration || 0;
+        a.width = video.videoWidth || 640; a.height = video.videoHeight || 360;
+        a.meta = `${a.width}×${a.height} · ${(a.duration || 0).toFixed(1)}s`;
+      } else if (a.kind === 'audio') {
+        const ctx = actx(); if (!ctx) continue;
+        const r = await fetch(a.src); const buf = await r.arrayBuffer();
+        a.buffer = await ctx.decodeAudioData(buf);
+        a.duration = a.buffer.duration; a.peaks = computePeaks(a.buffer);
+        a.meta = `${a.duration.toFixed(1)}s · ${a.buffer.sampleRate}Hz`;
+      }
+    } catch (e) { toast(`Could not reload ${a.name}: ${e.message}`, 'warn'); }
+  }
+  return need.length;
+}
+
 async function ingestFile(file) {
   if (/\.(json|fz)$/i.test(file.name)) {
     const text = await file.text();
@@ -1247,6 +1524,7 @@ async function ingestFile(file) {
     state.selected = project.layers[0]?.id || null;
     state.duration = projectDuration(project);
     state.time = 0;
+    await rehydrateAssets(project);
     await attachRenderer();
     setTime(0); redraw();
     toast(`Opened ${project.name} — ${project.layers.length} layers`, 'ok');
@@ -1333,10 +1611,15 @@ async function exportVideo() {
   rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   const done = new Promise(res => { rec.onstop = res; });
 
-  toast(`Recording ${state.duration}s in real time…`, 'info');
-  play(true); setTime(0);
+  toast(`Warming caches, then recording ${state.duration}s in real time…`, 'info');
+  play(true);
+  // Pre-render the piece so scene-entry raster/effect misses never stall the
+  // recording: every halftone, bloom and blur bucket is paid for up front.
+  for (let t = 0; t <= state.duration + 1e-6; t += 0.125) { setTime(t); redraw(); }
+  setTime(0); redraw();
   await new Promise(r => setTimeout(r, 120));
   rec.start(250);
+  state._exporting = true;
   play();                                   // start the transport
   const t0 = performance.now();
   await new Promise(res => {
@@ -1347,6 +1630,7 @@ async function exportVideo() {
     wait();
   });
   play(true);
+  state._exporting = false;
   rec.stop();
   await done;
   if (media.streamDest) { try { media.master.disconnect(media.streamDest); } catch { } media.streamDest = null; }
@@ -1410,6 +1694,10 @@ function wireShortcuts() {
   window.addEventListener('keydown', e => {
     const t = e.target;
     const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    if (e.key === 'm' && !e.metaKey && !e.ctrlKey && !e.altKey && !typing) { e.preventDefault(); api.addMarker(); return; }
+    if (e.key === 'M' && !e.metaKey && !e.ctrlKey && !typing) { e.preventDefault(); api.deleteMarker(); return; }
+    if (e.key === ',' && e.shiftKey && !typing) { e.preventDefault(); api.jumpMarker(-1); return; }
+    if (e.key === '.' && e.shiftKey && !typing) { e.preventDefault(); api.jumpMarker(1); return; }
     const mod = e.metaKey || e.ctrlKey;
 
     if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); window.__openPalette?.(); return; }
@@ -1475,6 +1763,36 @@ window.__FZ__ = {
   state, api, undo, setTime, play, redraw, toast,
   resolveScene: () => resolveScene(state.project, state.time),
   importFile: ingestFile, exportVideo, exportFrame,
+  /* aggregate signature of the current frame — lets the smoke suite assert
+     "the reference demo LOOKS right" without shipping pixels around */
+  frameSig() {
+    const rb = state.renderer?.readback?.();
+    if (!rb) return null;
+    const w = rb.canvas.width, h = rb.canvas.height;
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(rb.canvas, 0, 0);
+    const d = g.getImageData(0, 0, w, h).data;
+    let yellow = 0, dark = 0, paper = 0, sum = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i], gg = d[i + 1], b = d[i + 2];
+      const lum = 0.2126 * r + 0.7152 * gg + 0.0722 * b;
+      sum += lum;
+      if (r > 235 && gg > 195 && b < 100) yellow++;   // title/marker yellow only, not warm skin tones
+      if (lum < 60) dark++;
+      if (r > 205 && gg > 200 && b > 188) paper++;
+    }
+    let flips = 0, prev = null;
+    const y = Math.round(h * 0.5);
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const lum = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      const on = lum < 110;
+      if (prev !== null && on !== prev) flips++;
+      prev = on;
+    }
+    return { w, h, yellow, dark, paper, flips, mean: +(sum / (w * h)).toFixed(1) };
+  },
 };
 
 boot();

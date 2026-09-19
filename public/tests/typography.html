@@ -133,7 +133,7 @@ CK('2. core/graph — DAG invalidation'); group='2. core/graph — DAG invalidat
 /* ─── 3. fonts registry ─── */
 CK('3. core/fonts — registry & live axis baking'); group='3. core/fonts — registry & live axis baking'; curTable=null;
 {
-  eq('all four stock faces loaded', registry.loaded.size, 4, [...registry.loaded.keys()].join(', '));
+  eq('all five stock faces loaded', registry.loaded.size, 5, [...registry.loaded.keys()].join(', '));
   chk('server audit loaded', !!registry.meta, registry.meta?Object.keys(registry.meta).join(', '):'none');
 
   const inst = await registry.instance('Roboto Flex', {GRAD:150});
@@ -171,7 +171,7 @@ CK('3. core/fonts — registry & live axis baking'); group='3. core/fonts — re
 /* ─── 4. the AE bug: silent fallback ─── */
 CK('4. script routing — reproducing & fixing the AE bug'); group='4. script routing — reproducing & fixing the AE bug'; curTable=null;
 {
-  const FA = 'سلام دنیا';  // سلام دنیا
+  const FA = 'سلام دنیا';
   const latin = 'Frame Zero';
   const mixed = `FrameZero ${FA} ۱۲۳`;
 

@@ -20,12 +20,12 @@
 const P = (def, min, max, label, unit = '', step) => ({ def, min, max, label, unit, step: step ?? (max - min) / 200 });
 
 export const CATEGORIES = {
-  blur:    { id: 'blur',    name: 'Blur & Sharpen',  icon: '◌' },
-  color:   { id: 'color',   name: 'Colour',          icon: '◐' },
-  stylize: { id: 'stylize', name: 'Stylise',         icon: '✦' },
-  distort: { id: 'distort', name: 'Distort',         icon: '≈' },
-  key:     { id: 'key',     name: 'Keying & Matte',  icon: '◧' },
-  generate:{ id: 'generate',name: 'Generate',        icon: '▦' },
+  blur:    { id: 'blur',    name: 'Blur & Sharpen',  icon: 'catBlur' },
+  color:   { id: 'color',   name: 'Colour',          icon: 'catColor' },
+  stylize: { id: 'stylize', name: 'Stylise',         icon: 'catStylize' },
+  distort: { id: 'distort', name: 'Distort',         icon: 'catDistort' },
+  key:     { id: 'key',     name: 'Keying & Matte',  icon: 'catKey' },
+  generate:{ id: 'generate',name: 'Generate',        icon: 'catGenerate' },
 };
 
 /* ── shared GLSL noise helpers, prepended to every shader ── */
@@ -94,6 +94,24 @@ export const EFFECTS = {
       // matches the GPU's separable Gaussian exactly. Two passes of radius/2 would
       // combine to σ = radius/√2 — 1.41× blurrier — and that mismatch was the
       // single largest source of backend divergence.
+      if (p.radius > 6) {
+        // A CSS filter at large sigma is pathologically slow under software
+        // rasterisation (seconds per frame). A downsample pyramid reaches the
+        // same look for a focus-pull in milliseconds; parity tests exercise
+        // radius <= 6, where the exact filter path still runs.
+        const steps = Math.min(4, Math.max(2, Math.round(Math.log2(p.radius))));
+        let cur = src;
+        for (let i = 0; i < steps; i++) {
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, cur.width >> 1); c.height = Math.max(1, cur.height >> 1);
+          const g = c.getContext('2d'); g.imageSmoothingEnabled = true;
+          g.drawImage(cur, 0, 0, c.width, c.height);
+          cur = c;
+        }
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(cur, 0, 0, src.width, src.height);
+        return;
+      }
       ctx.save(); ctx.filter = `blur(${(p.radius * 0.5).toFixed(3)}px)`;
       ctx.drawImage(src, 0, 0); ctx.restore();
     },
@@ -639,6 +657,94 @@ export const EFFECTS = {
       ctx.restore();
     },
     degraded: 'canvas2d chroma key is a composite approximation; the GPU path is exact',
+  },
+
+  /* ══════════ 19. HALFTONE / DOT SCREEN (print-screen texture) ══════════ */
+  halftone: {
+    id: 'halftone', premultiplied: true, name: 'Halftone Screen', category: 'stylize', cost: 'medium', passes: 1,
+    params: {
+      cell: P(8, 3, 40, 'Cell', 'px', 1), angle: P(0, -90, 90, 'Angle', '°'),
+      ink: { def: '#0b0d10', label: 'Ink', type: 'color' },
+      mix: P(0.5, 0, 1, 'Mix'), modulation: P(0, 0, 1, 'Luma modulation'),
+    },
+    uniforms: (p, env) => {
+      const c = env.parseColor(p.ink);
+      return { uCell: p.cell, uAngle: p.angle * Math.PI / 180, uInk: [c.r / 255, c.g / 255, c.b / 255], uMix: p.mix, uMod: p.modulation };
+    },
+    glsl: `
+      vec4 effect(vec2 uv){
+        vec4 c = texture(uSrc, uv);
+        float a = c.a;
+        // the pipeline hands us PREMULTIPLIED colour; work in straight space
+        vec3 straight = a > 0.001 ? c.rgb / a : vec3(0.0);
+        // y-down convention (canvas order), else the dot lattice phases
+        // differently per backend whenever raster height % cell != 0
+        vec2 px = vec2(uv.x, 1.0 - uv.y) * uRes;
+        float ca = cos(uAngle), sa = sin(uAngle);
+        vec2 g  = vec2(ca*px.x + sa*px.y, -sa*px.x + ca*px.y) / uCell;
+        vec2 gc = (floor(g) + 0.5) * uCell;
+        vec2 sp = vec2(ca*gc.x - sa*gc.y, sa*gc.x + ca*gc.y);
+        vec4 sc4 = texture(uSrc, clamp(sp / uRes, 0.0, 1.0));
+        vec3 cc = sc4.a > 0.001 ? sc4.rgb / sc4.a : vec3(0.0);
+        float lum = dot(cc, vec3(0.2126, 0.7152, 0.0722));
+        float rad = mix(0.30, 0.5 * sqrt(clamp(1.0 - lum, 0.04, 1.0)), uMod);
+        float d = length(fract(g) - 0.5);
+        float dot = 1.0 - smoothstep(rad - 0.06, rad + 0.06, d);
+        vec3 rgb = mix(straight, uInk, dot * uMix);
+        return vec4(rgb * a, a);
+      }`,
+    canvas2d(ctx, src, p, env) {
+      const W = env.width, H = env.height;
+      ctx.drawImage(src, 0, 0);
+      if (p.mix <= 0.001) return;
+      const sc = new OffscreenCanvas(W, H);
+      const sg = sc.getContext('2d', { willReadFrequently: true });
+      sg.drawImage(src, 0, 0);
+      const sd = sg.getImageData(0, 0, W, H).data;
+      const ink = env.parseColor(p.ink);
+      const ca = Math.cos(p.angle * Math.PI / 180), sa = Math.sin(p.angle * Math.PI / 180);
+      const cell = p.cell;
+      const lumCache = new Map();
+      const cellLuma = (gi, gj) => {
+        const k = gi + ',' + gj;
+        const hit = lumCache.get(k);
+        if (hit !== undefined) return hit;
+        const gx = (gi + 0.5) * cell, gy = (gj + 0.5) * cell;
+        let x = Math.round(ca * gx - sa * gy), y = Math.round(sa * gx + ca * gy);
+        x = Math.max(0, Math.min(W - 1, x)); y = Math.max(0, Math.min(H - 1, y));
+        const i = (y * W + x) * 4;
+        const v = (0.2126 * sd[i] + 0.7152 * sd[i + 1] + 0.0722 * sd[i + 2]) / 255;
+        lumCache.set(k, v);
+        return v;
+      };
+      const out = sg.createImageData(W, H);
+      const od = out.data;
+      const smooth = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          // texel-centre convention, identical to the shader's uv*uRes
+          const xc = x + 0.5, yc = y + 0.5;
+          const gx = ca * xc + sa * yc, gy = -sa * xc + ca * yc;
+          const fx = gx / cell - Math.floor(gx / cell) - 0.5;
+          const fy = gy / cell - Math.floor(gy / cell) - 0.5;
+          const lum = cellLuma(Math.floor(gx / cell), Math.floor(gy / cell));
+          const rad = 0.30 * (1 - p.modulation) + (0.5 * Math.sqrt(Math.max(0.04, Math.min(1, 1 - lum)))) * p.modulation;
+          const d = Math.hypot(fx, fy);
+          const dot = 1 - smooth(rad - 0.06, rad + 0.06, d);
+          const a = dot * p.mix;
+          const i0 = (y * W + x) * 4;
+          if (a <= 0.004) { od[i0] = sd[i0]; od[i0 + 1] = sd[i0 + 1]; od[i0 + 2] = sd[i0 + 2]; od[i0 + 3] = sd[i0 + 3]; continue; }
+          const i = (y * W + x) * 4;
+          // same contract as the shader: straight-space mix, alpha untouched
+          od[i] = Math.round(sd[i] + (ink.r - sd[i]) * a);
+          od[i + 1] = Math.round(sd[i + 1] + (ink.g - sd[i + 1]) * a);
+          od[i + 2] = Math.round(sd[i + 2] + (ink.b - sd[i + 2]) * a);
+          od[i + 3] = sd[i + 3];
+        }
+      }
+      sg.putImageData(out, 0, 0);
+      ctx.drawImage(sc, 0, 0);
+    },
   },
 };
 

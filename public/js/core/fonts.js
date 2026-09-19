@@ -23,6 +23,7 @@ export const STOCK_FONTS = [
   { family: 'Roboto Flex',        file: '/fonts/RobotoFlex-var.ttf',       woff: false, role: 'display',   axes: ['wght', 'wdth', 'opsz', 'slnt', 'GRAD', 'XOPQ', 'YOPQ', 'XTRA', 'YTUC', 'YTLC', 'YTAS', 'YTDE', 'YTFI'] },
   { family: 'Noto Sans Arabic',   file: '/fonts/NotoSansArabic-var.ttf',   woff: false, role: 'arabic',    axes: ['wght', 'wdth'] },
   { family: 'Vazirmatn',          file: '/fonts/Vazirmatn-var.woff2',      woff: true,  role: 'persian',   axes: ['wght'] },
+  { family: 'Source Serif 4',     file: '/fonts/SourceSerif4-var.ttf',     woff: false, role: 'serif',     axes: ['opsz', 'wght'] },
 ];
 
 /* ── script detection: which font is legally allowed to draw this codepoint ──

@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node tools/test.mjs typography && node tools/test.mjs render && node tools/test.mjs document",
-    "test:syntax": "bash tools/syntax.sh",
+    "test:syntax": "bash tools/syntax.sh && node tools/hygiene.mjs",
     "test:css": "node tools/cssaudit.mjs",
     "test:smoke": "node tools/smoke.mjs",
     "gate": "npm run test:syntax && npm run test:css && npm test && npm run test:smoke",
