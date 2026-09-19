@@ -32,7 +32,10 @@ npm ci
 # 3. Run it
 npm start                 # → http://localhost:4173  (PORT=8080 npm start to move it)
 
-# 4. Tests (headless Chromium; macOS needs no extra system packages)
+# 4. Font-audit metadata (the in-app Font Clearance Report shells out to fontTools)
+python3 -m pip install --user fonttools brotli
+
+# 5. Tests (headless Chromium; macOS needs no extra system packages)
 npx playwright install chromium
 npm run gate
 ```
@@ -55,7 +58,10 @@ npm ci
 # 3. Run it
 npm start                 # → http://localhost:4173
 
-# 4. Tests: headless Chromium needs system libraries — this installs them
+# 4. Font-audit metadata (the in-app Font Clearance Report shells out to fontTools)
+python3 -m pip install --user fonttools brotli   # add --break-system-packages on PEP-668 distros
+
+# 5. Tests: headless Chromium needs system libraries — this installs them
 npx playwright install --with-deps chromium
 npm run gate
 ```
@@ -101,6 +107,10 @@ WSL2 forwards localhost automatically.
   (Linux only).
 - **Port already in use** — `PORT=5050 npm start`; the server honours `PORT`
   and binds `0.0.0.0` so containers and port-forwards work.
+- **Font Clearance Report says "audit unavailable"** — the `/api/font-axes`
+  endpoint shells out to `tools/fontinfo.py`, which needs Python fontTools:
+  `python3 -m pip install --user fonttools brotli` (add
+  `--break-system-packages` on PEP-668 distros such as Ubuntu 24.04).
 - **Fonts look wrong in exports** — the app bundles its five families and
   loads them through the FontFace API; nothing to install system-wide. If a
   *custom* imported font misses Persian glyphs, the in-app Font Clearance

@@ -18,6 +18,8 @@ jobs:
         run: npm ci
       - name: Chromium for the browser suites
         run: npx playwright install --with-deps chromium
+      - name: Font metadata deps (fontTools powers /api/font-axes)
+        run: python3 -m pip install --break-system-packages fonttools brotli
       - name: Static server
         run: |
           nohup node server.mjs > server.log 2>&1 &
