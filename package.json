@@ -1,7 +1,7 @@
 {
   "name": "framezero",
-  "version": "1.0.0",
-  "main": "server.mjs",
+  "version": "1.2.0",
+  "main": "desktop/main.cjs",
   "scripts": {
     "start": "node server.mjs",
     "test": "node tools/test.mjs typography && node tools/test.mjs render && node tools/test.mjs document",
@@ -10,7 +10,12 @@
     "test:smoke": "node tools/smoke.mjs",
     "gate": "npm run test:syntax && npm run test:css && npm test && npm run test:smoke",
     "brand": "node tools/brand.mjs",
-    "uishot": "node tools/uishot.mjs"
+    "uishot": "node tools/uishot.mjs",
+    "desktop:dir": "electron-builder --dir",
+    "desktop:linux": "electron-builder --linux",
+    "desktop:mac": "electron-builder --mac",
+    "desktop:win": "electron-builder --win",
+    "desktop:smoke": "electron . --smoke"
   },
   "keywords": [
     "motion-design",
@@ -20,11 +25,22 @@
     "variable-fonts",
     "canvas"
   ],
-  "author": "",
+  "author": "FrameZero contributors",
   "license": "MIT",
   "description": "Browser-native motion-design & kinetic-type studio: comp, variable-font typography, effects, masks/mattes, media, audio and video export with zero runtime deps.",
   "type": "module",
   "devDependencies": {
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3",
     "playwright": "^1.63.0"
-  }
+  },
+  "homepage": "https://github.com/ZALPRO/framezero#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZALPRO/framezero.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZALPRO/framezero/issues"
+  },
+  "desktopName": "FrameZero"
 }

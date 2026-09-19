@@ -1,0 +1,42 @@
+appId: app.framezero.desktop
+productName: FrameZero
+copyright: Copyright © 2026 FrameZero contributors (MIT)
+directories:
+  output: dist-desktop
+  buildResources: build
+files:
+  - public/**
+  - desktop/**
+  - package.json
+asar: true
+compression: normal
+publish:
+  provider: github
+  releaseType: release
+linux:
+  category: Graphics
+  synopsis: Browser-native motion-design and kinetic-type studio
+  description: "FrameZero - a browser-native motion-design and kinetic-type studio with WebGPU/Canvas2D dual backends, a per-frame engine, 17 render effects, professional typography, a timeline editor and WebM export."
+  maintainer: FrameZero contributors <framezero@users.noreply.github.com>
+  target:
+    - AppImage
+    - deb
+mac:
+  category: public.app-category.graphics-design
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  identity: null
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true

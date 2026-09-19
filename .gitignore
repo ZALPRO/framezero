@@ -4,3 +4,5 @@ test-results/
 exports/
 *.log
 .DS_Store
+dist/
+dist-desktop/
