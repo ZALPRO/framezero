@@ -17,7 +17,7 @@ const ALLOW = [
   'public/tests/diag.html', 'public/tests/document.html',
   'public/tests/render.html', 'public/tests/typography.html',
 ];
-const SKIP = new Set(['node_modules', 'test-results', '.git', 'exports', 'ref', '.fontcache']);
+const SKIP = new Set(['node_modules', 'test-results', '.git', 'exports', 'ref', '.fontcache', 'dist', 'dist-desktop']);
 const FA = /[\u0600-\u06FF\u200C]/;
 
 let fail = 0;
@@ -27,10 +27,12 @@ const walk = (dir) => {
     const p = join(dir, name);
     const st = statSync(p);
     if (st.isDirectory()) { walk(p); continue; }
-    if (/\.(png|jpe?g|webm|ogg|ttf|woff2|ico|webp)$/i.test(name)) continue;
+    if (/\.(png|jpe?g|webm|ogg|ttf|woff2|ico|webp|AppImage|deb|dmg|exe|zip|blockmap|snap)$/i.test(name)) continue;
+    if (st.size > 8 * 1024 * 1024) continue;            // never scan big blobs
     if (/(^|\/)(probe|dbg-)/.test(p)) { console.log(`FAIL scaffolding ships: ${p}`); fail++; continue; }
     if (ALLOW.includes(p.replace('./', ''))) continue;
     let s; try { s = readFileSync(p, 'utf8'); } catch { continue; }
+    if (s.includes('\u0000')) continue;                // binary — not prose
     s.split('\n').forEach((l, i) => {
       if (FA.test(l)) { console.log(`FAIL persian prose in ${p}:${i + 1}: ${l.trim().slice(0, 80)}`); fail++; }
     });
