@@ -4,7 +4,8 @@
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
-mkdirSync('/home/user/app/public/brand', { recursive: true });
+import { fileURLToPath } from 'node:url';
+mkdirSync(fileURLToPath(new URL('../public/brand', import.meta.url)), { recursive: true });
 const b = await chromium.launch({ args: ['--no-sandbox'] });
 const p = await b.newPage();
 await p.goto('http://127.0.0.1:4173/index.html');

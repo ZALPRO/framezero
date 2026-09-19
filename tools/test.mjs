@@ -5,7 +5,9 @@ import { mkdirSync } from 'node:fs';
 
 const suite = process.argv.slice(2).find(a => !a.startsWith('--')) || 'typography';
 const headed = process.argv.includes('--headed');
-const OUT = '/home/user/app/test-results';
+import { fileURLToPath } from 'node:url';
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const OUT = ROOT + 'test-results';
 mkdirSync(OUT, { recursive: true });
 
 const browser = await chromium.launch({

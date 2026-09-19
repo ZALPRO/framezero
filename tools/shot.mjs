@@ -1,7 +1,8 @@
 /* Deterministic beauty-shot + a hard check that every demo layer contributes ink. */
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
-mkdirSync('/home/user/app/test-results', { recursive: true });
+import { fileURLToPath } from 'node:url';
+mkdirSync(fileURLToPath(new URL('../test-results', import.meta.url)), { recursive: true });
 const b = await chromium.launch({ args: ['--enable-unsafe-swiftshader','--use-angle=swiftshader','--no-sandbox','--disable-gpu-sandbox'] });
 const p = await b.newPage({ viewport: { width: 1600, height: 1000 } });
 const errs = []; p.on('pageerror', e => errs.push(e.message));

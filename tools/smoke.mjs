@@ -10,7 +10,9 @@ import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 import { writeFile, readFile } from 'node:fs/promises';
 
-const OUT = '/home/user/app/test-results';
+import { fileURLToPath } from 'node:url';
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const OUT = ROOT + 'test-results';
 mkdirSync(OUT, { recursive: true });
 const headed = process.argv.includes('--headed');
 
