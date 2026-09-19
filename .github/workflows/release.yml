@@ -8,6 +8,9 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+permissions:
+  contents: write   # electron-builder publishes assets to the GitHub Release
+
 jobs:
   desktop:
     strategy:
